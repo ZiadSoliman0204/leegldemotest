@@ -1,0 +1,1 @@
+# Routes package for Law Firm AI Assistant API 

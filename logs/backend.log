@@ -1,0 +1,83 @@
+2025-06-20 20:49:46 | INFO     | __main__:main:75 - Starting Law Firm AI Assistant Backend
+2025-06-20 20:49:46 | INFO     | __main__:validate_environment:57 - Environment validation passed
+2025-06-20 20:49:46 | INFO     | __main__:create_directories:69 - Ensured directory exists: logs
+2025-06-20 20:49:46 | INFO     | __main__:create_directories:69 - Ensured directory exists: data
+2025-06-20 20:49:46 | INFO     | __main__:create_directories:69 - Ensured directory exists: ./data/chroma_db
+2025-06-20 20:49:46 | INFO     | __main__:main:88 - Server configuration: 0.0.0.0:8000 (debug=False)
+2025-06-20 20:49:47 | ERROR    | __main__:main:103 - Server startup failed: No module named 'backend.config'
+2025-06-20 20:50:05 | INFO     | __main__:main:75 - Starting Law Firm AI Assistant Backend
+2025-06-20 20:50:05 | INFO     | __main__:validate_environment:57 - Environment validation passed
+2025-06-20 20:50:05 | INFO     | __main__:create_directories:69 - Ensured directory exists: logs
+2025-06-20 20:50:05 | INFO     | __main__:create_directories:69 - Ensured directory exists: data
+2025-06-20 20:50:05 | INFO     | __main__:create_directories:69 - Ensured directory exists: ./data/chroma_db
+2025-06-20 20:50:05 | INFO     | __main__:main:88 - Server configuration: 0.0.0.0:8000 (debug=False)
+2025-06-20 20:50:05 | ERROR    | __main__:main:103 - Server startup failed: No module named 'backend.config'
+2025-06-20 20:51:54 | INFO     | __main__:main:75 - Starting Law Firm AI Assistant Backend
+2025-06-20 20:51:54 | INFO     | __main__:validate_environment:57 - Environment validation passed
+2025-06-20 20:51:54 | INFO     | __main__:create_directories:69 - Ensured directory exists: logs
+2025-06-20 20:51:54 | INFO     | __main__:create_directories:69 - Ensured directory exists: data
+2025-06-20 20:51:54 | INFO     | __main__:create_directories:69 - Ensured directory exists: ./data/chroma_db
+2025-06-20 20:51:54 | INFO     | __main__:main:88 - Server configuration: 0.0.0.0:8000 (debug=False)
+2025-06-20 20:51:58 | ERROR    | __main__:main:103 - Server startup failed: 'Settings' object has no attribute 'REQUEST_TIMEOUT'
+2025-06-20 20:52:39 | INFO     | __main__:main:75 - Starting Law Firm AI Assistant Backend
+2025-06-20 20:52:39 | INFO     | __main__:validate_environment:57 - Environment validation passed
+2025-06-20 20:52:39 | INFO     | __main__:create_directories:69 - Ensured directory exists: logs
+2025-06-20 20:52:39 | INFO     | __main__:create_directories:69 - Ensured directory exists: data
+2025-06-20 20:52:39 | INFO     | __main__:create_directories:69 - Ensured directory exists: ./data/chroma_db
+2025-06-20 20:52:39 | INFO     | __main__:main:88 - Server configuration: 0.0.0.0:8000 (debug=False)
+2025-06-20 20:52:42 | ERROR    | __main__:main:103 - Server startup failed: no such column: collections.topic
+2025-06-20 20:52:54 | INFO     | __main__:main:75 - Starting Law Firm AI Assistant Backend
+2025-06-20 20:52:54 | INFO     | __main__:validate_environment:57 - Environment validation passed
+2025-06-20 20:52:54 | INFO     | __main__:create_directories:69 - Ensured directory exists: logs
+2025-06-20 20:52:54 | INFO     | __main__:create_directories:69 - Ensured directory exists: data
+2025-06-20 20:52:54 | INFO     | __main__:create_directories:69 - Ensured directory exists: ./data/chroma_db
+2025-06-20 20:52:54 | INFO     | __main__:main:88 - Server configuration: 0.0.0.0:8000 (debug=False)
+2025-06-20 20:52:57 | ERROR    | __main__:main:103 - Server startup failed: no such column: collections.topic
+2025-06-20 20:53:15 | INFO     | __main__:main:75 - Starting Law Firm AI Assistant Backend
+2025-06-20 20:53:15 | INFO     | __main__:validate_environment:57 - Environment validation passed
+2025-06-20 20:53:15 | INFO     | __main__:create_directories:69 - Ensured directory exists: logs
+2025-06-20 20:53:15 | INFO     | __main__:create_directories:69 - Ensured directory exists: data
+2025-06-20 20:53:15 | INFO     | __main__:create_directories:69 - Ensured directory exists: ./data/chroma_db
+2025-06-20 20:53:15 | INFO     | __main__:main:88 - Server configuration: 0.0.0.0:8000 (debug=False)
+2025-06-20 20:53:21 | INFO     | backend.main:startup_event:43 - Starting Law Firm AI Assistant API
+2025-06-20 20:53:21 | INFO     | backend.main:startup_event:44 - LLM API URL: https://your-coreweave-endpoint.com/v1/chat/completions
+2025-06-20 20:53:21 | INFO     | backend.main:startup_event:45 - ChromaDB Path: ./data/chroma_db
+2025-06-20 20:58:42 | INFO     | __main__:main:75 - Starting Law Firm AI Assistant Backend
+2025-06-20 20:58:42 | INFO     | __main__:validate_environment:57 - Environment validation passed
+2025-06-20 20:58:42 | INFO     | __main__:create_directories:69 - Ensured directory exists: logs
+2025-06-20 20:58:42 | INFO     | __main__:create_directories:69 - Ensured directory exists: data
+2025-06-20 20:58:42 | INFO     | __main__:create_directories:69 - Ensured directory exists: ./data/chroma_db
+2025-06-20 20:58:42 | INFO     | __main__:main:88 - Server configuration: 0.0.0.0:8000 (debug=False)
+2025-06-20 20:58:44 | INFO     | backend.main:startup_event:43 - Starting Law Firm AI Assistant API
+2025-06-20 20:58:44 | INFO     | backend.main:startup_event:44 - LLM API URL: https://your-coreweave-endpoint.com/v1/chat/completions
+2025-06-20 20:58:44 | INFO     | backend.main:startup_event:45 - ChromaDB Path: ./data/chroma_db
+2025-06-20 20:59:06 | INFO     | __main__:main:75 - Starting Law Firm AI Assistant Backend
+2025-06-20 20:59:06 | INFO     | __main__:validate_environment:57 - Environment validation passed
+2025-06-20 20:59:06 | INFO     | __main__:create_directories:69 - Ensured directory exists: logs
+2025-06-20 20:59:06 | INFO     | __main__:create_directories:69 - Ensured directory exists: data
+2025-06-20 20:59:06 | INFO     | __main__:create_directories:69 - Ensured directory exists: ./data/chroma_db
+2025-06-20 20:59:06 | INFO     | __main__:main:88 - Server configuration: 0.0.0.0:8000 (debug=False)
+2025-06-20 20:59:08 | INFO     | backend.main:startup_event:43 - Starting Law Firm AI Assistant API
+2025-06-20 20:59:08 | INFO     | backend.main:startup_event:44 - LLM API URL: https://your-coreweave-endpoint.com/v1/chat/completions
+2025-06-20 20:59:08 | INFO     | backend.main:startup_event:45 - ChromaDB Path: ./data/chroma_db
+2025-06-20 21:10:22 | INFO     | __main__:main:75 - Starting Law Firm AI Assistant Backend
+2025-06-20 21:10:22 | INFO     | __main__:validate_environment:57 - Environment validation passed
+2025-06-20 21:10:22 | INFO     | __main__:create_directories:69 - Ensured directory exists: logs
+2025-06-20 21:10:22 | INFO     | __main__:create_directories:69 - Ensured directory exists: data
+2025-06-20 21:10:22 | INFO     | __main__:create_directories:69 - Ensured directory exists: ./data/chroma_db
+2025-06-20 21:10:22 | INFO     | __main__:main:88 - Server configuration: 0.0.0.0:8000 (debug=False)
+2025-06-20 21:10:25 | INFO     | backend.main:startup_event:43 - Starting Law Firm AI Assistant API
+2025-06-20 21:10:25 | INFO     | backend.main:startup_event:44 - LLM API URL: https://your-coreweave-endpoint.com/v1/chat/completions
+2025-06-20 21:10:25 | INFO     | backend.main:startup_event:45 - ChromaDB Path: ./data/chroma_db
+2025-06-20 21:11:30 | INFO     | backend.routes.chat:chat_completion:36 - Retrieving RAG context for query: Hi...
+2025-06-20 21:11:30 | INFO     | backend.routes.chat:chat_completion:56 - No relevant documents found in RAG search
+2025-06-20 21:11:30 | INFO     | backend.routes.chat:chat_completion:71 - Sending request to remote LLM API
+2025-06-20 21:11:30 | INFO     | backend.services.llm_client:chat_completion:81 - Sending request to LLM API: https://your-coreweave-endpoint.com/v1/chat/completions
+2025-06-20 21:11:30 | ERROR    | backend.services.llm_client:chat_completion:114 - Unexpected error calling LLM API: [Errno 11001] getaddrinfo failed
+2025-06-20 21:11:30 | ERROR    | backend.routes.chat:chat_completion:90 - Error in chat completion: Failed to call LLM API: [Errno 11001] getaddrinfo failed
+2025-06-20 21:11:37 | INFO     | backend.routes.chat:chat_completion:36 - Retrieving RAG context for query: Hello...
+2025-06-20 21:11:37 | INFO     | backend.routes.chat:chat_completion:56 - No relevant documents found in RAG search
+2025-06-20 21:11:37 | INFO     | backend.routes.chat:chat_completion:71 - Sending request to remote LLM API
+2025-06-20 21:11:37 | INFO     | backend.services.llm_client:chat_completion:81 - Sending request to LLM API: https://your-coreweave-endpoint.com/v1/chat/completions
+2025-06-20 21:11:37 | ERROR    | backend.services.llm_client:chat_completion:114 - Unexpected error calling LLM API: [Errno 11001] getaddrinfo failed
+2025-06-20 21:11:37 | ERROR    | backend.routes.chat:chat_completion:90 - Error in chat completion: Failed to call LLM API: [Errno 11001] getaddrinfo failed

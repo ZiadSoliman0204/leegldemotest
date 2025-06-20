@@ -1,0 +1,1 @@
+# Backend package for Law Firm AI Assistant 
