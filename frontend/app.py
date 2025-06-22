@@ -6,7 +6,9 @@ Features: Authentication, themes, document management, analytics
 import streamlit as st
 import requests
 import os
-from datetime import datetime
+import uuid
+import hashlib
+from datetime import datetime, date
 from typing import Optional, Dict, Any, List
 import json
 
@@ -43,7 +45,34 @@ class LawFirmAIApp:
         self.auth_manager = AuthManager()
         self.theme_manager = ThemeManager()
         self.db_manager = DatabaseManager()
+        self.session_id = self._get_or_create_session_id()
         self._initialize_session_state()
+    
+    def _get_or_create_session_id(self) -> str:
+        """Get or create session ID for audit tracking"""
+        if 'session_id' not in st.session_state:
+            st.session_state.session_id = str(uuid.uuid4())
+        return st.session_state.session_id
+    
+    def _get_client_ip(self) -> str:
+        """Get client IP address from request headers"""
+        try:
+            # Try to get real IP from headers (works with reverse proxies)
+            if 'X-Forwarded-For' in st.context.headers:
+                return st.context.headers['X-Forwarded-For'].split(',')[0].strip()
+            elif 'X-Real-IP' in st.context.headers:
+                return st.context.headers['X-Real-IP']
+            else:
+                return "127.0.0.1"  # Fallback for local development
+        except Exception:
+            return "unknown"
+    
+    def _get_user_agent(self) -> str:
+        """Get user agent from request headers"""
+        try:
+            return st.context.headers.get('User-Agent', 'unknown')
+        except Exception:
+            return "unknown"
     
     def _initialize_session_state(self):
         """Initialize session state variables"""
@@ -143,24 +172,96 @@ class LawFirmAIApp:
             st.session_state.temperature = temperature
     
     def send_chat_message(self, message: str) -> Optional[Dict[str, Any]]:
-        """Send a chat message to the API"""
+        """Send a chat message to the API with enhanced audit logging"""
+        current_user = self.auth_manager.get_current_user()
+        ip_address = self._get_client_ip()
+        user_agent = self._get_user_agent()
+        
+        # Log chat initiation
+        self.db_manager.log_audit_event(
+            user_id=current_user['id'] if current_user else None,
+            username=current_user['username'] if current_user else 'anonymous',
+            action_type="CHAT_INITIATED",
+            resource="chat_completion",
+            status="initiated",
+            details=f"Chat message length: {len(message)} characters",
+            ip_address=ip_address,
+            user_agent=user_agent,
+            session_id=self.session_id,
+            content_to_hash=message,  # Hash the prompt for audit
+            severity_level="INFO"
+        )
+        
         try:
             payload = self._build_chat_payload(message)
             response = self._make_api_request(payload)
             
             if response.status_code == 200:
-                return response.json()
+                result = response.json()
+                
+                # Log successful chat completion
+                self.db_manager.log_audit_event(
+                    user_id=current_user['id'] if current_user else None,
+                    username=current_user['username'] if current_user else 'anonymous',
+                    action_type="CHAT_COMPLETED",
+                    resource="chat_completion",
+                    status="success",
+                    details=f"Response generated successfully. Tokens used: {result.get('usage', {}).get('total_tokens', 'unknown')}",
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                    session_id=self.session_id,
+                    severity_level="INFO"
+                )
+                
+                return result
             else:
+                # Log API error
+                self.db_manager.log_audit_event(
+                    user_id=current_user['id'] if current_user else None,
+                    username=current_user['username'] if current_user else 'anonymous',
+                    action_type="CHAT_API_ERROR",
+                    resource="chat_completion",
+                    status="error",
+                    details=f"API Error: {response.status_code} - {response.text}",
+                    ip_address=ip_address,
+                    session_id=self.session_id,
+                    severity_level="ERROR"
+                )
+                
                 st.error(f"API Error: {response.status_code} - {response.text}")
                 return None
                 
         except requests.exceptions.RequestException as error:
+            # Log connection error
+            self.db_manager.log_audit_event(
+                user_id=current_user['id'] if current_user else None,
+                username=current_user['username'] if current_user else 'anonymous',
+                action_type="CHAT_CONNECTION_ERROR",
+                resource="chat_completion",
+                status="error",
+                details=f"Connection error: {str(error)}",
+                ip_address=ip_address,
+                session_id=self.session_id,
+                severity_level="ERROR"
+            )
+            
             st.error(f"Connection error: {str(error)}")
-            self.auth_manager.log_user_action("CHAT_ERROR", f"Connection error: {str(error)}")
             return None
         except Exception as error:
+            # Log unexpected error
+            self.db_manager.log_audit_event(
+                user_id=current_user['id'] if current_user else None,
+                username=current_user['username'] if current_user else 'anonymous',
+                action_type="CHAT_SYSTEM_ERROR",
+                resource="chat_completion",
+                status="error",
+                details=f"System error: {str(error)}",
+                ip_address=ip_address,
+                session_id=self.session_id,
+                severity_level="ERROR"
+            )
+            
             st.error(f"Unexpected error: {str(error)}")
-            self.auth_manager.log_user_action("CHAT_ERROR", f"Unexpected error: {str(error)}")
             return None
     
     def _build_chat_payload(self, message: str) -> Dict[str, Any]:
@@ -284,44 +385,133 @@ class LawFirmAIApp:
                 st.rerun()
     
     def upload_document(self, uploaded_file):
-        """Upload and process a document"""
+        """Upload document with enhanced audit logging"""
+        current_user = self.auth_manager.get_current_user()
+        ip_address = self._get_client_ip()
+        user_agent = self._get_user_agent()
+        
+        if not uploaded_file:
+            return
+        
+        # Log document upload initiation
+        self.db_manager.log_audit_event(
+            user_id=current_user['id'] if current_user else None,
+            username=current_user['username'] if current_user else 'anonymous',
+            action_type="DOC_UPLOAD_INITIATED",
+            resource=f"document:{uploaded_file.name}",
+            status="initiated",
+            details=f"File size: {uploaded_file.size} bytes, Type: {uploaded_file.type}",
+            ip_address=ip_address,
+            user_agent=user_agent,
+            session_id=self.session_id,
+            severity_level="INFO"
+        )
+        
         try:
-            with st.spinner(f"Processing {uploaded_file.name}..."):
-                files = {"file": (uploaded_file.name, uploaded_file.getvalue(), "application/pdf")}
-                response = requests.post(
-                    f"{API_BASE_URL}/api/v1/documents/upload", 
-                    files=files,
-                    timeout=UPLOAD_TIMEOUT
+            files = {"file": (uploaded_file.name, uploaded_file, uploaded_file.type)}
+            response = requests.post(
+                f"{API_BASE_URL}/api/v1/documents/upload",
+                files=files,
+                timeout=UPLOAD_TIMEOUT
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                st.success(f"Document '{uploaded_file.name}' uploaded successfully!")
+                
+                # Log successful upload
+                self.db_manager.log_audit_event(
+                    user_id=current_user['id'] if current_user else None,
+                    username=current_user['username'] if current_user else 'anonymous',
+                    action_type="DOC_UPLOAD_SUCCESS",
+                    resource=f"document:{uploaded_file.name}",
+                    status="success",
+                    details=f"Document ID: {result.get('document_id', 'unknown')}, Chunks: {result.get('chunk_count', 0)}",
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                    session_id=self.session_id,
+                    severity_level="INFO"
                 )
                 
-                if response.status_code == 200:
-                    result = response.json()
-                    st.success(f"Document processed successfully! {result['pages_processed']} chunks created.")
-                    
-                    # Log document upload
-                    self.auth_manager.log_user_action(
-                        "DOCUMENT_UPLOADED", 
-                        f"Uploaded document: {uploaded_file.name}"
-                    )
-                    
-                    # Refresh document list
-                    self.load_document_list()
-                else:
-                    st.error(f"Upload failed: {response.text}")
-                    
-        except requests.exceptions.RequestException as error:
-            st.error(f"Connection error during upload: {str(error)}")
+                # Log user action for legacy compatibility
+                self.auth_manager.log_user_action(
+                    "DOCUMENT_UPLOADED", 
+                    f"Uploaded document: {uploaded_file.name}"
+                )
+                
+                self.load_document_list()
+            else:
+                error_msg = f"Upload failed: {response.text}"
+                st.error(error_msg)
+                
+                # Log upload failure
+                self.db_manager.log_audit_event(
+                    user_id=current_user['id'] if current_user else None,
+                    username=current_user['username'] if current_user else 'anonymous',
+                    action_type="DOC_UPLOAD_FAILED",
+                    resource=f"document:{uploaded_file.name}",
+                    status="failure",
+                    details=f"Upload failed: {response.status_code} - {response.text}",
+                    ip_address=ip_address,
+                    session_id=self.session_id,
+                    severity_level="WARNING"
+                )
+                
         except Exception as error:
-            st.error(f"Upload error: {str(error)}")
+            error_msg = f"Error uploading document: {str(error)}"
+            st.error(error_msg)
+            
+            # Log upload error
+            self.db_manager.log_audit_event(
+                user_id=current_user['id'] if current_user else None,
+                username=current_user['username'] if current_user else 'anonymous',
+                action_type="DOC_UPLOAD_ERROR",
+                resource=f"document:{uploaded_file.name}",
+                status="error",
+                details=f"Upload error: {str(error)}",
+                ip_address=ip_address,
+                session_id=self.session_id,
+                severity_level="ERROR"
+            )
     
     def delete_document(self, document_id: str, filename: str):
-        """Delete a document from the system"""
+        """Delete document with enhanced audit logging"""
+        current_user = self.auth_manager.get_current_user()
+        ip_address = self._get_client_ip()
+        
+        # Log document deletion attempt
+        self.db_manager.log_audit_event(
+            user_id=current_user['id'] if current_user else None,
+            username=current_user['username'] if current_user else 'anonymous',
+            action_type="DOC_DELETE_INITIATED",
+            resource=f"document:{filename}",
+            status="initiated",
+            details=f"Document ID: {document_id}",
+            ip_address=ip_address,
+            session_id=self.session_id,
+            severity_level="INFO"
+        )
+        
         try:
             response = requests.delete(f"{API_BASE_URL}/api/v1/documents/{document_id}")
+            
             if response.status_code == 200:
                 st.success(f"Document '{filename}' deleted successfully!")
                 
-                # Log document deletion
+                # Log successful deletion
+                self.db_manager.log_audit_event(
+                    user_id=current_user['id'] if current_user else None,
+                    username=current_user['username'] if current_user else 'anonymous',
+                    action_type="DOC_DELETE_SUCCESS",
+                    resource=f"document:{filename}",
+                    status="success",
+                    details=f"Document successfully deleted. ID: {document_id}",
+                    ip_address=ip_address,
+                    session_id=self.session_id,
+                    severity_level="INFO"
+                )
+                
+                # Legacy audit logging
                 self.auth_manager.log_user_action(
                     "DOCUMENT_DELETED", 
                     f"Deleted document: {filename}"
@@ -329,10 +519,38 @@ class LawFirmAIApp:
                 
                 self.load_document_list()
             else:
-                st.error(f"Failed to delete document: {response.text}")
+                error_msg = f"Failed to delete document: {response.text}"
+                st.error(error_msg)
+                
+                # Log deletion failure
+                self.db_manager.log_audit_event(
+                    user_id=current_user['id'] if current_user else None,
+                    username=current_user['username'] if current_user else 'anonymous',
+                    action_type="DOC_DELETE_FAILED",
+                    resource=f"document:{filename}",
+                    status="failure",
+                    details=f"Deletion failed: {response.status_code} - {response.text}",
+                    ip_address=ip_address,
+                    session_id=self.session_id,
+                    severity_level="WARNING"
+                )
                 
         except Exception as error:
-            st.error(f"Error deleting document: {str(error)}")
+            error_msg = f"Error deleting document: {str(error)}"
+            st.error(error_msg)
+            
+            # Log deletion error
+            self.db_manager.log_audit_event(
+                user_id=current_user['id'] if current_user else None,
+                username=current_user['username'] if current_user else 'anonymous',
+                action_type="DOC_DELETE_ERROR",
+                resource=f"document:{filename}",
+                status="error",
+                details=f"Deletion error: {str(error)}",
+                ip_address=ip_address,
+                session_id=self.session_id,
+                severity_level="ERROR"
+            )
     
     def load_document_list(self):
         """Load the list of uploaded documents"""
@@ -443,33 +661,243 @@ class LawFirmAIApp:
         else:
             st.info("No recent activity to display.")
     
-    def render_audit_logs(self):
-        """Render audit logs (admin only)"""
+    def render_advanced_audit_logs(self):
+        """Render advanced audit logs viewer with filters and export"""
         current_user = self.auth_manager.get_current_user()
         if not current_user or current_user['role'] != 'admin':
-            st.error("Access denied. Admin privileges required.")
+            st.error("🔒 Access denied. Admin privileges required.")
             return
         
-        st.header("Audit Logs")
+        st.header("Advanced Audit Logs")
         
-        # Get audit logs from database
-        logs = self.db_manager.get_audit_logs(50)
+        # Log access to audit logs
+        self.db_manager.log_audit_event(
+            user_id=current_user['id'],
+            username=current_user['username'],
+            action_type="AUDIT_LOG_ACCESS",
+            resource="audit_logs",
+            status="success",
+            details="Admin accessed audit log viewer",
+            ip_address=self._get_client_ip(),
+            session_id=self.session_id,
+            severity_level="INFO"
+        )
         
+        # Initialize filter state
+        if 'audit_filters' not in st.session_state:
+            st.session_state.audit_filters = {
+                'action_type': '',
+                'username': '',
+                'status': '',
+                'severity_level': '',
+                'date_from': '',
+                'date_to': '',
+                'page': 1
+            }
+        
+        # Filters Section
+        with st.expander("Filter Options", expanded=True):
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                action_types = ['', 'LOGIN', 'CHAT', 'DOC_UPLOAD', 'DOC_DELETE', 'PASSWORD', 'USER_CREATE', 'AUDIT']
+                st.session_state.audit_filters['action_type'] = st.selectbox(
+                    "Action Type",
+                    action_types,
+                    index=action_types.index(st.session_state.audit_filters['action_type']) if st.session_state.audit_filters['action_type'] in action_types else 0
+                )
+                
+                st.session_state.audit_filters['username'] = st.text_input(
+                    "Username",
+                    value=st.session_state.audit_filters['username'],
+                    placeholder="Search by username..."
+                )
+            
+            with col2:
+                statuses = ['', 'success', 'failure', 'error', 'initiated']
+                st.session_state.audit_filters['status'] = st.selectbox(
+                    "Status",
+                    statuses,
+                    index=statuses.index(st.session_state.audit_filters['status']) if st.session_state.audit_filters['status'] in statuses else 0
+                )
+                
+                severity_levels = ['', 'INFO', 'WARNING', 'ERROR']
+                st.session_state.audit_filters['severity_level'] = st.selectbox(
+                    "Severity Level",
+                    severity_levels,
+                    index=severity_levels.index(st.session_state.audit_filters['severity_level']) if st.session_state.audit_filters['severity_level'] in severity_levels else 0
+                )
+            
+            with col3:
+                st.session_state.audit_filters['date_from'] = st.date_input(
+                    "Date From",
+                    value=date.fromisoformat(st.session_state.audit_filters['date_from']) if st.session_state.audit_filters['date_from'] else None
+                )
+                if st.session_state.audit_filters['date_from']:
+                    st.session_state.audit_filters['date_from'] = str(st.session_state.audit_filters['date_from'])
+                else:
+                    st.session_state.audit_filters['date_from'] = ''
+                
+                st.session_state.audit_filters['date_to'] = st.date_input(
+                    "Date To",
+                    value=date.fromisoformat(st.session_state.audit_filters['date_to']) if st.session_state.audit_filters['date_to'] else None
+                )
+                if st.session_state.audit_filters['date_to']:
+                    st.session_state.audit_filters['date_to'] = str(st.session_state.audit_filters['date_to'])
+                else:
+                    st.session_state.audit_filters['date_to'] = ''
+            
+            # Action buttons
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                if st.button("Apply Filters", use_container_width=True):
+                    st.session_state.audit_filters['page'] = 1
+                    st.rerun()
+            
+            with col2:
+                if st.button("Clear Filters", use_container_width=True):
+                    st.session_state.audit_filters = {
+                        'action_type': '',
+                        'username': '',
+                        'status': '',
+                        'severity_level': '',
+                        'date_from': '',
+                        'date_to': '',
+                        'page': 1
+                    }
+                    st.rerun()
+            
+            with col3:
+                if st.button("Export CSV", use_container_width=True):
+                    csv_data = self.db_manager.export_audit_logs_csv(st.session_state.audit_filters)
+                    if csv_data:
+                        st.download_button(
+                            label="Download CSV",
+                            data=csv_data,
+                            file_name=f"audit_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                            mime="text/csv",
+                            use_container_width=True
+                        )
+                        
+                        # Log export action
+                        self.db_manager.log_audit_event(
+                            user_id=current_user['id'],
+                            username=current_user['username'],
+                            action_type="AUDIT_LOG_EXPORT",
+                            resource="audit_logs",
+                            status="success",
+                            details=f"Exported audit logs with filters: {json.dumps(st.session_state.audit_filters)}",
+                            ip_address=self._get_client_ip(),
+                            session_id=self.session_id,
+                            severity_level="INFO"
+                        )
+        
+        # Get filtered logs
+        page_size = 25
+        logs, total_count = self.db_manager.get_audit_logs_filtered(
+            page=st.session_state.audit_filters['page'],
+            page_size=page_size,
+            **{k: v for k, v in st.session_state.audit_filters.items() if k != 'page'}
+        )
+        
+        # Display pagination info
+        total_pages = (total_count + page_size - 1) // page_size
+        st.markdown(f"**Showing page {st.session_state.audit_filters['page']} of {total_pages} ({total_count} total records)**")
+        
+        # Pagination controls
+        if total_pages > 1:
+            col1, col2, col3, col4, col5 = st.columns(5)
+            
+            with col1:
+                if st.button("First", disabled=st.session_state.audit_filters['page'] == 1):
+                    st.session_state.audit_filters['page'] = 1
+                    st.rerun()
+            
+            with col2:
+                if st.button("Previous", disabled=st.session_state.audit_filters['page'] == 1):
+                    st.session_state.audit_filters['page'] -= 1
+                    st.rerun()
+            
+            with col3:
+                new_page = st.number_input(
+                    "Page",
+                    min_value=1,
+                    max_value=total_pages,
+                    value=st.session_state.audit_filters['page'],
+                    step=1
+                )
+                if new_page != st.session_state.audit_filters['page']:
+                    st.session_state.audit_filters['page'] = new_page
+                    st.rerun()
+            
+            with col4:
+                if st.button("Next", disabled=st.session_state.audit_filters['page'] == total_pages):
+                    st.session_state.audit_filters['page'] += 1
+                    st.rerun()
+            
+            with col5:
+                if st.button("Last", disabled=st.session_state.audit_filters['page'] == total_pages):
+                    st.session_state.audit_filters['page'] = total_pages
+                    st.rerun()
+        
+        # Display logs
         if logs:
             for log in logs:
-                timestamp = log['timestamp']
-                action_color = self.theme_manager.get_status_color('primary')
+                # Status indicators (text-based, no emojis)
+                status_indicators = {
+                    'success': '[SUCCESS]',
+                    'failure': '[FAILED]',
+                    'error': '[ERROR]',
+                    'initiated': '[INITIATED]'
+                }
+                status_indicator = status_indicators.get(log['status'], '[INFO]')
                 
-                st.markdown(f"""
-                <div class="audit-entry">
-                    <div class="audit-action" style="color: {action_color};">{log['action']}</div>
-                    <div><strong>User:</strong> {log['username']}</div>
-                    <div><strong>Details:</strong> {log['details']}</div>
-                    <div class="audit-timestamp">{timestamp}</div>
-                </div>
-                """, unsafe_allow_html=True)
+                timestamp = datetime.fromisoformat(log['timestamp']).strftime('%Y-%m-%d %H:%M:%S') if log['timestamp'] else 'Unknown'
+                
+                # Create a clean text-based display
+                log_text = f"**{status_indicator} {log['action_type']}** - {timestamp}\n"
+                log_text += f"User: {log['username']} | Status: {log['status']} | Severity: {log['severity_level']}\n"
+                
+                if log['resource']:
+                    log_text += f"Resource: {log['resource']}\n"
+                if log['ip_address']:
+                    log_text += f"IP: {log['ip_address']}\n"
+                if log['content_hash']:
+                    log_text += f"Content Hash: {log['content_hash']}\n"
+                if log['session_id']:
+                    log_text += f"Session: {log['session_id'][:8]}...\n"
+                if log['details']:
+                    log_text += f"Details: {log['details']}\n"
+                
+                # Use colored containers based on severity
+                if log['severity_level'] == 'ERROR':
+                    st.error(log_text)
+                elif log['severity_level'] == 'WARNING':
+                    st.warning(log_text)
+                else:
+                    st.info(log_text)
+                
+                st.markdown("---")
         else:
-            st.info("No audit logs available.")
+            st.info("No audit logs found matching the current filters.")
+        
+        # Real-time refresh option
+        st.markdown("---")
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Refresh Logs", use_container_width=True):
+                st.rerun()
+        
+        with col2:
+            auto_refresh = st.checkbox("Auto-refresh (30s)", value=False)
+            if auto_refresh:
+                import time
+                time.sleep(30)
+                st.rerun()
+
+    def render_audit_logs(self):
+        """Legacy audit logs method - redirect to advanced viewer"""
+        self.render_advanced_audit_logs()
     
     def run(self):
         """Main application loop"""
@@ -512,7 +940,7 @@ def main():
     """Main function to run the app"""
     st.set_page_config(
         page_title="Legal AI Assistant",
-        page_icon="⚖️",
+        page_icon=":material/balance:",
         layout="wide",
         initial_sidebar_state="expanded"
     )
