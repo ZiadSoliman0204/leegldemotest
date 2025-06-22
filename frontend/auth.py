@@ -288,6 +288,37 @@ class AuthManager:
         
         return is_admin
     
+    def check_admin_access(self, action_description: str = "access admin features") -> bool:
+        """
+        Check admin access and show appropriate error messages
+        Returns True if user is admin, False otherwise
+        """
+        current_user = self.get_current_user()
+        
+        if not current_user:
+            st.error("🔒 Please log in to access this feature.")
+            return False
+        
+        if current_user.get('role') != 'admin':
+            # Log unauthorized access attempt
+            self.db_manager.log_audit_event(
+                user_id=current_user['id'],
+                username=current_user['username'],
+                action_type="UNAUTHORIZED_ACCESS_ATTEMPT",
+                resource="admin_features",
+                status="failure",
+                details=f"Non-admin user attempted to {action_description}",
+                ip_address=self._get_client_ip(),
+                session_id=st.session_state.get('session_id', 'unknown'),
+                severity_level="WARNING"
+            )
+            
+            st.error("🔒 Access denied. Administrator privileges required.")
+            st.info("If you believe you should have admin access, please contact your system administrator.")
+            return False
+        
+        return True
+    
     def log_user_action(self, action: str, details: str = ""):
         """
         Legacy method for backward compatibility
@@ -392,15 +423,20 @@ class AuthManager:
         
         with st.sidebar:
             st.markdown("---")
-            st.markdown(f"**Logged in as:** {current_user['username']}")
-            st.markdown(f"**Role:** {current_user['role'].title()}")
+            
+            # User info with role badge
+            role_badge = "🔑 Admin" if current_user['role'] == 'admin' else "👤 User"
+            st.markdown(f"**👋 {current_user['username']}**")
+            st.markdown(f"**Role:** {role_badge}")
             
             # Show session info
             login_time = st.session_state.get('login_time', datetime.now())
             if isinstance(login_time, str):
                 login_time = datetime.fromisoformat(login_time)
             session_duration = datetime.now() - login_time
-            st.markdown(f"**Session:** {str(session_duration).split('.')[0]}")
+            hours, remainder = divmod(session_duration.seconds, 3600)
+            minutes, _ = divmod(remainder, 60)
+            st.markdown(f"**Session:** {hours}h {minutes}m")
             
             # User actions
             col1, col2 = st.columns(2)

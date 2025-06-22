@@ -123,7 +123,7 @@ class DatabaseManager:
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         username TEXT UNIQUE NOT NULL,
                         hashed_password TEXT NOT NULL,
-                        role TEXT DEFAULT 'user',
+                        role TEXT CHECK(role IN ('admin', 'user')) DEFAULT 'user',
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         is_active BOOLEAN DEFAULT 1,
                         last_login TIMESTAMP,
@@ -701,4 +701,193 @@ class DatabaseManager:
                 
         except Exception as error:
             logger.error(f"Error retrieving users: {error}")
-            return [] 
+            return []
+    
+    def delete_user(self, user_id: int, admin_username: str, ip_address: str = "") -> bool:
+        """Delete a user (admin only)"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get user info before deletion for audit
+                cursor.execute("SELECT username, role FROM users WHERE id = ?", (user_id,))
+                user_info = cursor.fetchone()
+                
+                if not user_info:
+                    self.log_audit_event(
+                        user_id=None,
+                        username=admin_username,
+                        action_type="USER_DELETE_FAILED",
+                        resource=f"user_id:{user_id}",
+                        status="failure",
+                        details=f"User deletion failed - user not found",
+                        ip_address=ip_address,
+                        severity_level="WARNING"
+                    )
+                    return False
+                
+                # Prevent deletion of the last admin
+                if user_info['role'] == 'admin':
+                    cursor.execute("SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = 1")
+                    admin_count = cursor.fetchone()[0]
+                    if admin_count <= 1:
+                        self.log_audit_event(
+                            user_id=None,
+                            username=admin_username,
+                            action_type="USER_DELETE_BLOCKED",
+                            resource=f"user:{user_info['username']}",
+                            status="failure",
+                            details="Cannot delete the last admin user",
+                            ip_address=ip_address,
+                            severity_level="WARNING"
+                        )
+                        return False
+                
+                # Soft delete the user (set is_active to 0)
+                cursor.execute("UPDATE users SET is_active = 0 WHERE id = ?", (user_id,))
+                
+                if cursor.rowcount > 0:
+                    conn.commit()
+                    self.log_audit_event(
+                        user_id=None,
+                        username=admin_username,
+                        action_type="USER_DELETE_SUCCESS",
+                        resource=f"user:{user_info['username']}",
+                        status="success",
+                        details=f"User '{user_info['username']}' (role: {user_info['role']}) deleted by admin",
+                        ip_address=ip_address,
+                        severity_level="INFO"
+                    )
+                    return True
+                else:
+                    return False
+                
+        except Exception as error:
+            logger.error(f"Error deleting user: {error}")
+            self.log_audit_event(
+                user_id=None,
+                username=admin_username,
+                action_type="USER_DELETE_ERROR",
+                resource=f"user_id:{user_id}",
+                status="error",
+                details=f"User deletion error: {str(error)}",
+                ip_address=ip_address,
+                severity_level="ERROR"
+            )
+            return False
+    
+    def change_user_role(self, user_id: int, new_role: str, admin_username: str, ip_address: str = "") -> bool:
+        """Change a user's role (admin only)"""
+        if new_role not in ['admin', 'user']:
+            return False
+            
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get current user info
+                cursor.execute("SELECT username, role FROM users WHERE id = ? AND is_active = 1", (user_id,))
+                user_info = cursor.fetchone()
+                
+                if not user_info:
+                    self.log_audit_event(
+                        user_id=None,
+                        username=admin_username,
+                        action_type="ROLE_CHANGE_FAILED",
+                        resource=f"user_id:{user_id}",
+                        status="failure",
+                        details=f"Role change failed - user not found",
+                        ip_address=ip_address,
+                        severity_level="WARNING"
+                    )
+                    return False
+                
+                old_role = user_info['role']
+                username = user_info['username']
+                
+                # Prevent changing the last admin to user
+                if old_role == 'admin' and new_role == 'user':
+                    cursor.execute("SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = 1")
+                    admin_count = cursor.fetchone()[0]
+                    if admin_count <= 1:
+                        self.log_audit_event(
+                            user_id=user_id,
+                            username=admin_username,
+                            action_type="ROLE_CHANGE_BLOCKED",
+                            resource=f"user:{username}",
+                            status="failure",
+                            details="Cannot demote the last admin user",
+                            ip_address=ip_address,
+                            severity_level="WARNING"
+                        )
+                        return False
+                
+                # Update the role
+                cursor.execute("UPDATE users SET role = ? WHERE id = ?", (new_role, user_id))
+                
+                if cursor.rowcount > 0:
+                    conn.commit()
+                    self.log_audit_event(
+                        user_id=user_id,
+                        username=admin_username,
+                        action_type="ROLE_CHANGE_SUCCESS",
+                        resource=f"user:{username}",
+                        status="success",
+                        details=f"User '{username}' role changed from '{old_role}' to '{new_role}' by admin",
+                        ip_address=ip_address,
+                        severity_level="INFO"
+                    )
+                    return True
+                else:
+                    return False
+                
+        except Exception as error:
+            logger.error(f"Error changing user role: {error}")
+            self.log_audit_event(
+                user_id=None,
+                username=admin_username,
+                action_type="ROLE_CHANGE_ERROR",
+                resource=f"user_id:{user_id}",
+                status="error",
+                details=f"Role change error: {str(error)}",
+                ip_address=ip_address,
+                severity_level="ERROR"
+            )
+            return False
+    
+    def reset_failed_login_attempts(self, user_id: int, admin_username: str, ip_address: str = "") -> bool:
+        """Reset failed login attempts for a user (admin only)"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get username for audit
+                cursor.execute("SELECT username FROM users WHERE id = ? AND is_active = 1", (user_id,))
+                user_info = cursor.fetchone()
+                
+                if not user_info:
+                    return False
+                
+                username = user_info['username']
+                
+                cursor.execute("UPDATE users SET failed_login_attempts = 0 WHERE id = ?", (user_id,))
+                
+                if cursor.rowcount > 0:
+                    conn.commit()
+                    self.log_audit_event(
+                        user_id=user_id,
+                        username=admin_username,
+                        action_type="ACCOUNT_UNLOCK",
+                        resource=f"user:{username}",
+                        status="success",
+                        details=f"Failed login attempts reset for user '{username}' by admin",
+                        ip_address=ip_address,
+                        severity_level="INFO"
+                    )
+                    return True
+                else:
+                    return False
+                
+        except Exception as error:
+            logger.error(f"Error resetting failed login attempts: {error}")
+            return False 

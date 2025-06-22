@@ -123,20 +123,22 @@ class LawFirmAIApp:
         with st.sidebar:
             st.header("Navigation")
             
+            # Basic views for all users
             views = {
                 'chat': 'Chat Assistant',
                 'documents': 'Document Management',
-                'analytics': 'Analytics Dashboard',
-                'audit': 'Audit Logs (Admin Only)'
+                'analytics': 'Analytics Dashboard'
             }
             
+            # Add admin-only views
             current_user = self.auth_manager.get_current_user()
+            if current_user and current_user.get('role') == 'admin':
+                views.update({
+                    'audit': 'Audit Logs',
+                    'users': 'User Management'
+                })
             
             for view_key, view_name in views.items():
-                # Skip audit logs for non-admin users
-                if view_key == 'audit' and (not current_user or current_user['role'] != 'admin'):
-                    continue
-                
                 if st.button(view_name, use_container_width=True):
                     st.session_state.current_view = view_key
                     st.rerun()
@@ -899,6 +901,297 @@ class LawFirmAIApp:
         """Legacy audit logs method - redirect to advanced viewer"""
         self.render_advanced_audit_logs()
     
+    def render_user_management(self):
+        """Render comprehensive user management interface (Admin Only)"""
+        if not self.auth_manager.check_admin_access("manage users"):
+            return
+        
+        current_user = self.auth_manager.get_current_user()
+        st.header("👥 User Management")
+        st.markdown("Manage user accounts, roles, and permissions")
+        
+        # Log access to user management
+        self.db_manager.log_audit_event(
+            user_id=current_user['id'],
+            username=current_user['username'],
+            action_type="USER_MANAGEMENT_ACCESS",
+            resource="user_management",
+            status="success",
+            details="Admin accessed user management interface",
+            ip_address=self._get_client_ip(),
+            session_id=self.session_id,
+            severity_level="INFO"
+        )
+        
+        # User management tabs
+        tab1, tab2, tab3 = st.tabs(["👥 Manage Users", "➕ Add User", "📊 User Stats"])
+        
+        with tab1:
+            self._render_users_list()
+        
+        with tab2:
+            self._render_add_user_form()
+        
+        with tab3:
+            self._render_user_statistics()
+    
+    def _render_users_list(self):
+        """Render the users list with management actions"""
+        st.subheader("Current Users")
+        
+        users = self.db_manager.get_users()
+        
+        if not users:
+            st.info("No users found.")
+            return
+        
+        # Users table
+        for user in users:
+            with st.container():
+                col1, col2, col3, col4, col5 = st.columns([3, 1, 1, 1, 2])
+                
+                with col1:
+                    st.markdown(f"**{user['username']}**")
+                    created_date = user['created_at'][:10] if user['created_at'] else 'Unknown'
+                    st.caption(f"Created: {created_date}")
+                
+                with col2:
+                    role_color = "🔑" if user['role'] == 'admin' else "👤"
+                    st.markdown(f"{role_color} {user['role'].title()}")
+                
+                with col3:
+                    # Account status
+                    if user.get('failed_login_attempts', 0) >= 5:
+                        st.error("🔒 Locked")
+                    else:
+                        st.success("✅ Active")
+                
+                with col4:
+                    # Last login
+                    if user.get('last_login'):
+                        last_login = user['last_login'][:10]
+                        st.text(f"Last: {last_login}")
+                    else:
+                        st.text("Never")
+                
+                with col5:
+                    # Action buttons
+                    action_col1, action_col2, action_col3 = st.columns(3)
+                    
+                    with action_col1:
+                        # Change role button
+                        if st.button("🔄", key=f"role_{user['id']}", help="Change Role"):
+                            st.session_state[f'change_role_{user["id"]}'] = True
+                            st.rerun()
+                    
+                    with action_col2:
+                        # Unlock account button
+                        if user.get('failed_login_attempts', 0) >= 5:
+                            if st.button("🔓", key=f"unlock_{user['id']}", help="Unlock Account"):
+                                success = self.db_manager.reset_failed_login_attempts(
+                                    user['id'], 
+                                    self.auth_manager.get_current_user()['username'],
+                                    self._get_client_ip()
+                                )
+                                if success:
+                                    st.success(f"Account unlocked for {user['username']}")
+                                    st.rerun()
+                                else:
+                                    st.error("Failed to unlock account")
+                    
+                    with action_col3:
+                        # Delete user button (with protection)
+                        current_admin = self.auth_manager.get_current_user()
+                        can_delete = user['username'] != current_admin['username']  # Can't delete self
+                        
+                        if st.button("🗑️", key=f"delete_{user['id']}", 
+                                   help="Delete User" if can_delete else "Cannot delete yourself",
+                                   disabled=not can_delete):
+                            st.session_state[f'confirm_delete_{user["id"]}'] = True
+                            st.rerun()
+                
+                # Role change dialog
+                if st.session_state.get(f'change_role_{user["id"]}', False):
+                    with st.form(f"change_role_form_{user['id']}"):
+                        st.write(f"Change role for **{user['username']}**")
+                        current_role = user['role']
+                        new_role = st.selectbox(
+                            "New Role",
+                            options=['user', 'admin'],
+                            index=0 if current_role == 'admin' else 1,
+                            key=f"new_role_{user['id']}"
+                        )
+                        
+                        col_submit, col_cancel = st.columns(2)
+                        with col_submit:
+                            if st.form_submit_button("✅ Confirm"):
+                                success = self.db_manager.change_user_role(
+                                    user['id'], new_role,
+                                    self.auth_manager.get_current_user()['username'],
+                                    self._get_client_ip()
+                                )
+                                if success:
+                                    st.success(f"Role changed to {new_role} for {user['username']}")
+                                else:
+                                    st.error("Failed to change role")
+                                st.session_state[f'change_role_{user["id"]}'] = False
+                                st.rerun()
+                        
+                        with col_cancel:
+                            if st.form_submit_button("❌ Cancel"):
+                                st.session_state[f'change_role_{user["id"]}'] = False
+                                st.rerun()
+                
+                # Delete confirmation dialog
+                if st.session_state.get(f'confirm_delete_{user["id"]}', False):
+                    st.error(f"⚠️ **Delete user '{user['username']}'?**")
+                    st.write("This action cannot be undone.")
+                    
+                    col_confirm, col_cancel = st.columns(2)
+                    with col_confirm:
+                        if st.button("🗑️ Delete", key=f"confirm_delete_{user['id']}"):
+                            success = self.db_manager.delete_user(
+                                user['id'],
+                                self.auth_manager.get_current_user()['username'],
+                                self._get_client_ip()
+                            )
+                            if success:
+                                st.success(f"User {user['username']} deleted successfully")
+                            else:
+                                st.error("Failed to delete user")
+                            st.session_state[f'confirm_delete_{user["id"]}'] = False
+                            st.rerun()
+                    
+                    with col_cancel:
+                        if st.button("❌ Cancel", key=f"cancel_delete_{user['id']}"):
+                            st.session_state[f'confirm_delete_{user["id"]}'] = False
+                            st.rerun()
+                
+                st.markdown("---")
+    
+    def _render_add_user_form(self):
+        """Render the add user form"""
+        st.subheader("Add New User")
+        
+        with st.form("add_user_form"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                new_username = st.text_input(
+                    "Username",
+                    help="Choose a unique username (3-50 characters)",
+                    placeholder="Enter username"
+                )
+            
+            with col2:
+                new_role = st.selectbox(
+                    "Role",
+                    options=['user', 'admin'],
+                    help="Select user role"
+                )
+            
+            new_password = st.text_input(
+                "Password",
+                type="password",
+                help="Secure password (minimum 8 characters)",
+                placeholder="Enter secure password"
+            )
+            
+            confirm_password = st.text_input(
+                "Confirm Password",
+                type="password",
+                help="Re-enter password to confirm",
+                placeholder="Confirm password"
+            )
+            
+            submit_button = st.form_submit_button("➕ Create User", use_container_width=True)
+            
+            if submit_button:
+                # Validation
+                if not new_username or not new_password:
+                    st.error("Username and password are required")
+                elif len(new_username) < 3:
+                    st.error("Username must be at least 3 characters long")
+                elif len(new_password) < 8:
+                    st.error("Password must be at least 8 characters long")
+                elif new_password != confirm_password:
+                    st.error("Passwords do not match")
+                else:
+                    # Create user
+                    success = self.db_manager.create_user(
+                        username=new_username,
+                        password=new_password,
+                        role=new_role,
+                        creator_username=self.auth_manager.get_current_user()['username'],
+                        ip_address=self._get_client_ip()
+                    )
+                    
+                    if success:
+                        st.success(f"✅ User '{new_username}' created successfully with role '{new_role}'")
+                        st.balloons()
+                        # Clear form by rerunning
+                        st.rerun()
+                    else:
+                        st.error("❌ Failed to create user. Username may already exist.")
+        
+        # Password guidelines
+        with st.expander("💡 Password Security Guidelines"):
+            st.markdown("""
+            **Strong Password Requirements:**
+            - Minimum 8 characters length
+            - Mix of uppercase and lowercase letters
+            - Include numbers and special characters
+            - Avoid common words or personal information
+            - Unique to this system
+            """)
+    
+    def _render_user_statistics(self):
+        """Render user statistics and insights"""
+        st.subheader("User Statistics")
+        
+        users = self.db_manager.get_users()
+        
+        if not users:
+            st.info("No user data available.")
+            return
+        
+        # Basic stats
+        total_users = len(users)
+        admin_users = sum(1 for user in users if user['role'] == 'admin')
+        regular_users = total_users - admin_users
+        locked_accounts = sum(1 for user in users if user.get('failed_login_attempts', 0) >= 5)
+        
+        # Display metrics
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Total Users", total_users)
+        
+        with col2:
+            st.metric("Admin Users", admin_users)
+        
+        with col3:
+            st.metric("Regular Users", regular_users)
+        
+        with col4:
+            st.metric("Locked Accounts", locked_accounts)
+        
+        # Recent activity
+        st.markdown("### Recent User Activity")
+        recent_logs, _ = self.db_manager.get_audit_logs_filtered(
+            page=1, 
+            page_size=10,
+            action_type="LOGIN"
+        )
+        
+        if recent_logs:
+            for log in recent_logs[:5]:  # Show last 5 login events
+                timestamp = log['timestamp'][:19] if log['timestamp'] else 'Unknown'
+                status_icon = "✅" if log['status'] == 'success' else "❌"
+                st.text(f"{status_icon} {log['username']} - {timestamp}")
+        else:
+            st.info("No recent login activity.")
+    
     def run(self):
         """Main application loop"""
         # Apply theme first
@@ -931,6 +1224,8 @@ class LawFirmAIApp:
             self.render_analytics_dashboard()
         elif st.session_state.current_view == 'audit':
             self.render_audit_logs()
+        elif st.session_state.current_view == 'users':
+            self.render_user_management()
         
         # Handle chat input (only show in chat view)
         if st.session_state.current_view == 'chat':

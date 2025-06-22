@@ -26,3 +26,32 @@
 2025-06-22 22:00:06 | INFO     | backend.main:startup_event:43 - Starting Law Firm AI Assistant API
 2025-06-22 22:00:06 | INFO     | backend.main:startup_event:44 - LLM API URL: https://your-coreweave-endpoint.com/v1/chat/completions
 2025-06-22 22:00:06 | INFO     | backend.main:startup_event:45 - ChromaDB Path: ./data/chroma_db
+2025-06-22 22:05:18 | INFO     | __main__:main:75 - Starting Law Firm AI Assistant Backend
+2025-06-22 22:05:18 | INFO     | __main__:validate_environment:57 - Environment validation passed
+2025-06-22 22:05:18 | INFO     | __main__:create_directories:69 - Ensured directory exists: logs
+2025-06-22 22:05:18 | INFO     | __main__:create_directories:69 - Ensured directory exists: data
+2025-06-22 22:05:18 | INFO     | __main__:create_directories:69 - Ensured directory exists: ./data/chroma_db
+2025-06-22 22:05:18 | INFO     | __main__:main:88 - Server configuration: 0.0.0.0:8000 (debug=False)
+2025-06-22 22:05:21 | INFO     | backend.main:startup_event:43 - Starting Law Firm AI Assistant API
+2025-06-22 22:05:21 | INFO     | backend.main:startup_event:44 - LLM API URL: https://your-coreweave-endpoint.com/v1/chat/completions
+2025-06-22 22:05:21 | INFO     | backend.main:startup_event:45 - ChromaDB Path: ./data/chroma_db
+2025-06-22 22:31:18 | INFO     | __main__:main:75 - Starting Law Firm AI Assistant Backend
+2025-06-22 22:31:18 | INFO     | __main__:validate_environment:57 - Environment validation passed
+2025-06-22 22:31:18 | INFO     | __main__:create_directories:69 - Ensured directory exists: logs
+2025-06-22 22:31:18 | INFO     | __main__:create_directories:69 - Ensured directory exists: data
+2025-06-22 22:31:18 | INFO     | __main__:create_directories:69 - Ensured directory exists: ./data/chroma_db
+2025-06-22 22:31:18 | INFO     | __main__:main:88 - Server configuration: 0.0.0.0:8000 (debug=False)
+2025-06-22 22:31:21 | INFO     | backend.main:startup_event:43 - Starting Law Firm AI Assistant API
+2025-06-22 22:31:21 | INFO     | backend.main:startup_event:44 - LLM API URL: https://your-coreweave-endpoint.com/v1/chat/completions
+2025-06-22 22:31:21 | INFO     | backend.main:startup_event:45 - ChromaDB Path: ./data/chroma_db
+2025-06-22 22:33:05 | INFO     | backend.routes.chat:log_chat_audit:62 - AUDIT_LOG: action_type=CHAT_INITIATED, status=initiated, resource=chat_completion, ip_address=127.0.0.1, user_agent=python-requests/2.31.0, content_hash=460b3a7da007b7af, severity_level=INFO, request_id=9f6bfb97-410c-4cc2-9f34-27f73df29d34, details=Chat request initiated. Message length: 4 chars, RAG enabled: True, max_tokens: 2048, temperature: 0.7
+2025-06-22 22:33:05 | INFO     | backend.routes.chat:chat_completion:110 - Retrieving RAG context for query: Chat...
+2025-06-22 22:33:05 | INFO     | backend.routes.chat:log_chat_audit:62 - AUDIT_LOG: action_type=RAG_QUERY_INITIATED, status=initiated, resource=rag_service, ip_address=127.0.0.1, user_agent=, content_hash=460b3a7da007b7af, severity_level=INFO, request_id=9f6bfb97-410c-4cc2-9f34-27f73df29d34, details=Starting RAG document search for query hash: 460b3a7da007b7af
+2025-06-22 22:33:05 | INFO     | backend.routes.chat:log_chat_audit:62 - AUDIT_LOG: action_type=RAG_QUERY_NO_RESULTS, status=success, resource=rag_service, ip_address=127.0.0.1, user_agent=, content_hash=460b3a7da007b7af, severity_level=INFO, request_id=9f6bfb97-410c-4cc2-9f34-27f73df29d34, details=No relevant documents found above similarity threshold (0.7)
+2025-06-22 22:33:05 | INFO     | backend.routes.chat:chat_completion:171 - No relevant documents found in RAG search
+2025-06-22 22:33:05 | INFO     | backend.routes.chat:log_chat_audit:62 - AUDIT_LOG: action_type=LLM_API_CALL_INITIATED, status=initiated, resource=llm_api, ip_address=127.0.0.1, user_agent=, content_hash=460b3a7da007b7af, severity_level=INFO, request_id=9f6bfb97-410c-4cc2-9f34-27f73df29d34, details=Sending request to LLM API. Enhanced prompt length: 4 chars
+2025-06-22 22:33:05 | INFO     | backend.routes.chat:chat_completion:198 - Sending request to remote LLM API
+2025-06-22 22:33:06 | INFO     | backend.services.llm_client:chat_completion:81 - Sending request to LLM API: https://your-coreweave-endpoint.com/v1/chat/completions
+2025-06-22 22:33:06 | ERROR    | backend.services.llm_client:chat_completion:114 - Unexpected error calling LLM API: [Errno 11001] getaddrinfo failed
+2025-06-22 22:33:06 | INFO     | backend.routes.chat:log_chat_audit:62 - AUDIT_LOG: action_type=CHAT_SYSTEM_ERROR, status=error, resource=chat_completion, ip_address=127.0.0.1, user_agent=python-requests/2.31.0, content_hash=460b3a7da007b7af, severity_level=ERROR, request_id=9f6bfb97-410c-4cc2-9f34-27f73df29d34, details=System error after 0.37s: Unexpected error in chat completion: Failed to call LLM API: [Errno 11001] getaddrinfo failed
+2025-06-22 22:33:06 | ERROR    | backend.routes.chat:chat_completion:295 - Unexpected error in chat completion: Failed to call LLM API: [Errno 11001] getaddrinfo failed
