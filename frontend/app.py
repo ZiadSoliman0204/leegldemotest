@@ -84,7 +84,12 @@ class LawFirmAIApp:
             'use_rag': True,
             'max_tokens': DEFAULT_MAX_TOKENS,
             'temperature': DEFAULT_TEMPERATURE,
-            'show_change_password': False
+            'show_change_password': False,
+            # Chat history variables
+            'current_chat_session_id': None,
+            'chat_sessions': [],
+            'chat_sessions_loaded': False,
+            'chat_history_needs_refresh': False
         }
         
         for key, value in default_values.items():
@@ -119,8 +124,12 @@ class LawFirmAIApp:
             self.theme_manager.render_status_indicator("offline", "API Disconnected")
     
     def render_navigation(self):
-        """Render navigation menu"""
+        """Render navigation menu with chat history"""
         with st.sidebar:
+            # Chat History Section
+            self.render_chat_history_sidebar()
+            
+            st.markdown("---")
             st.header("Navigation")
             
             # Basic views for all users
@@ -142,6 +151,82 @@ class LawFirmAIApp:
                 if st.button(view_name, use_container_width=True):
                     st.session_state.current_view = view_key
                     st.rerun()
+    
+    def render_chat_history_sidebar(self):
+        """Render chat history in sidebar"""
+        current_user = self.auth_manager.get_current_user()
+        if not current_user:
+            return
+        
+        st.header("Chat History")
+        
+        # Load chat sessions if not already loaded
+        if not st.session_state.chat_sessions_loaded or st.session_state.chat_history_needs_refresh:
+            st.session_state.chat_sessions = self.db_manager.get_user_chat_sessions(current_user['id'])
+            st.session_state.chat_sessions_loaded = True
+            st.session_state.chat_history_needs_refresh = False
+        
+        # New Chat button
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            if st.button("New Chat", use_container_width=True, type="primary"):
+                self.start_new_chat()
+        
+        with col2:
+            if st.button("Refresh", help="Refresh chat list"):
+                st.session_state.chat_history_needs_refresh = True
+                st.rerun()
+        
+        # Current session indicator
+        if st.session_state.current_chat_session_id:
+            current_session = self.db_manager.get_chat_session_info(
+                st.session_state.current_chat_session_id, 
+                current_user['id']
+            )
+            if current_session:
+                st.info(f"**Current:** {current_session['title']}")
+        
+        # Chat sessions list
+        if st.session_state.chat_sessions:
+            st.markdown("**Recent Chats:**")
+            
+            for session in st.session_state.chat_sessions[:10]:  # Show last 10 chats
+                # Format timestamp
+                try:
+                    from datetime import datetime
+                    created_time = datetime.fromisoformat(session['created_at'])
+                    time_str = created_time.strftime("%m/%d %H:%M")
+                except:
+                    time_str = "Unknown"
+                
+                # Chat item container
+                with st.container():
+                    col_title, col_action = st.columns([4, 1])
+                    
+                    with col_title:
+                        # Truncate long titles
+                        title = session['title']
+                        if len(title) > 25:
+                            title = title[:22] + "..."
+                        
+                        # Different style for current session
+                        if session['id'] == st.session_state.current_chat_session_id:
+                            st.markdown(f"**• {title}**")
+                        else:
+                            if st.button(f"{title}", key=f"chat_{session['id']}", use_container_width=True):
+                                self.load_chat_session(session['id'])
+                        
+                        st.caption(f"{time_str} • {session['message_count']} msgs")
+                    
+                    with col_action:
+                        # Delete button
+                        if st.button("Delete", key=f"del_{session['id']}", help="Delete chat"):
+                            if self.delete_chat_session(session['id']):
+                                st.rerun()
+                
+                st.markdown("---")
+        else:
+            st.info("No previous chats. Start a new conversation!")
     
     def render_settings_sidebar(self):
         """Render settings in sidebar"""
@@ -172,6 +257,195 @@ class LawFirmAIApp:
                 0.1
             )
             st.session_state.temperature = temperature
+    
+    # Chat History Management Methods
+    
+    def start_new_chat(self):
+        """Start a new chat session"""
+        current_user = self.auth_manager.get_current_user()
+        if not current_user:
+            st.error("Please log in to start a new chat")
+            return
+        
+        # Create new session in database
+        session_id = self.db_manager.create_chat_session(current_user['id'])
+        
+        if session_id:
+            # Clear current messages and set new session
+            st.session_state.messages = []
+            st.session_state.current_chat_session_id = session_id
+            st.session_state.chat_history_needs_refresh = True
+            
+            # Log the new chat session
+            self.db_manager.log_audit_event(
+                user_id=current_user['id'],
+                username=current_user['username'],
+                action_type="CHAT_SESSION_CREATED",
+                resource=f"chat_session:{session_id}",
+                status="success",
+                details="New chat session created",
+                ip_address=self._get_client_ip(),
+                session_id=self.session_id,
+                severity_level="INFO"
+            )
+            
+            st.success("New chat started!")
+            st.rerun()
+        else:
+            st.error("Failed to create new chat session")
+    
+    def load_chat_session(self, session_id: int):
+        """Load an existing chat session"""
+        current_user = self.auth_manager.get_current_user()
+        if not current_user:
+            return
+        
+        # Load messages from database
+        messages = self.db_manager.get_chat_messages(session_id, current_user['id'])
+        
+        if messages is not None:  # None means unauthorized access
+            # Convert database messages to session state format
+            st.session_state.messages = []
+            for msg in messages:
+                st.session_state.messages.append({
+                    'role': msg['role'],
+                    'content': msg['content'],
+                    'sources': msg.get('sources', [])
+                })
+            
+            st.session_state.current_chat_session_id = session_id
+            
+            # Log session access
+            self.db_manager.log_audit_event(
+                user_id=current_user['id'],
+                username=current_user['username'],
+                action_type="CHAT_SESSION_LOADED",
+                resource=f"chat_session:{session_id}",
+                status="success",
+                details=f"Loaded chat session with {len(messages)} messages",
+                ip_address=self._get_client_ip(),
+                session_id=self.session_id,
+                severity_level="INFO"
+            )
+            
+            st.rerun()
+        else:
+            st.error("Unable to load chat session")
+    
+    def delete_chat_session(self, session_id: int) -> bool:
+        """Delete a chat session"""
+        current_user = self.auth_manager.get_current_user()
+        if not current_user:
+            return False
+        
+        # Delete from database
+        success = self.db_manager.delete_chat_session(session_id, current_user['id'])
+        
+        if success:
+            # If current session was deleted, clear it
+            if st.session_state.current_chat_session_id == session_id:
+                st.session_state.current_chat_session_id = None
+                st.session_state.messages = []
+            
+            # Refresh chat list
+            st.session_state.chat_history_needs_refresh = True
+            
+            st.success("Chat deleted successfully")
+            return True
+        else:
+            st.error("Failed to delete chat")
+            return False
+    
+    def save_message_to_current_session(self, role: str, content: str, sources: List[str] = None):
+        """Save a message to the current chat session"""
+        current_user = self.auth_manager.get_current_user()
+        if not current_user:
+            return
+        
+        # Ensure we have a current session
+        if not st.session_state.current_chat_session_id:
+            # Create a new session if none exists
+            session_id = self.db_manager.create_chat_session(current_user['id'])
+            if session_id:
+                st.session_state.current_chat_session_id = session_id
+                st.session_state.chat_history_needs_refresh = True
+            else:
+                st.error("Failed to create chat session")
+                return
+        
+        # Save message to database
+        success = self.db_manager.add_chat_message(
+            session_id=st.session_state.current_chat_session_id,
+            user_id=current_user['id'],
+            role=role,
+            content=content,
+            sources=sources
+        )
+        
+        if success:
+            # Refresh chat sessions to update message count
+            st.session_state.chat_history_needs_refresh = True
+        else:
+            st.warning("Message saved to session but not persisted to database")
+    
+    def export_current_chat(self):
+        """Export current chat to text format"""
+        if not st.session_state.messages:
+            st.warning("No messages to export")
+            return
+        
+        current_user = self.auth_manager.get_current_user()
+        if not current_user:
+            return
+        
+        # Get session info for title
+        session_title = "Untitled Chat"
+        if st.session_state.current_chat_session_id:
+            session_info = self.db_manager.get_chat_session_info(
+                st.session_state.current_chat_session_id, 
+                current_user['id']
+            )
+            if session_info:
+                session_title = session_info['title']
+        
+        # Generate export content
+        export_content = f"Chat Export: {session_title}\n"
+        export_content += f"Exported on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        export_content += f"User: {current_user['username']}\n"
+        export_content += "=" * 50 + "\n\n"
+        
+        for msg in st.session_state.messages:
+            role = "You" if msg['role'] == 'user' else "Legal Assistant"
+            export_content += f"{role}:\n{msg['content']}\n\n"
+            
+            if msg.get('sources'):
+                export_content += "Sources:\n"
+                for i, source in enumerate(msg['sources'], 1):
+                    export_content += f"  {i}. {source}\n"
+                export_content += "\n"
+            
+            export_content += "-" * 30 + "\n\n"
+        
+        # Provide download
+        st.download_button(
+            label="Download as .txt",
+            data=export_content.encode('utf-8'),
+            file_name=f"chat_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+            mime="text/plain"
+        )
+        
+        # Log export action
+        self.db_manager.log_audit_event(
+            user_id=current_user['id'],
+            username=current_user['username'],
+            action_type="CHAT_EXPORT",
+            resource=f"chat_session:{st.session_state.current_chat_session_id}",
+            status="success",
+            details=f"Exported chat '{session_title}' with {len(st.session_state.messages)} messages",
+            ip_address=self._get_client_ip(),
+            session_id=self.session_id,
+            severity_level="INFO"
+        )
     
     def send_chat_message(self, message: str) -> Optional[Dict[str, Any]]:
         """Send a chat message to the API with enhanced audit logging"""
@@ -345,7 +619,7 @@ class LawFirmAIApp:
         st.rerun()
     
     def _add_message_to_history(self, role: str, content: str, sources: List[str] = None):
-        """Add a message to the chat history"""
+        """Add a message to the chat history and save to database"""
         message = {
             "role": role,
             "content": content,
@@ -356,6 +630,9 @@ class LawFirmAIApp:
             message["sources"] = sources
         
         st.session_state.messages.append(message)
+        
+        # Save to database
+        self.save_message_to_current_session(role, content, sources)
     
     def _handle_api_response(self, response: Dict[str, Any]):
         """Handle API response and add to chat history"""
@@ -381,10 +658,18 @@ class LawFirmAIApp:
         
         # Clear chat button
         if st.session_state.messages:
-            if st.button("Clear Chat History"):
-                st.session_state.messages = []
-                self.auth_manager.log_user_action("CHAT_CLEARED", "User cleared chat history")
-                st.rerun()
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Clear Current Chat", use_container_width=True):
+                    st.session_state.messages = []
+                    # Start a new session for the next message
+                    st.session_state.current_chat_session_id = None
+                    self.auth_manager.log_user_action("CHAT_CLEARED", "User cleared current chat")
+                    st.rerun()
+            
+            with col2:
+                if st.button("Export Chat", use_container_width=True):
+                    self.export_current_chat()
     
     def upload_document(self, uploaded_file):
         """Upload document with enhanced audit logging"""
@@ -667,7 +952,7 @@ class LawFirmAIApp:
         """Render advanced audit logs viewer with filters and export"""
         current_user = self.auth_manager.get_current_user()
         if not current_user or current_user['role'] != 'admin':
-            st.error("🔒 Access denied. Admin privileges required.")
+            st.error("Access denied. Admin privileges required.")
             return
         
         st.header("Advanced Audit Logs")
@@ -907,7 +1192,7 @@ class LawFirmAIApp:
             return
         
         current_user = self.auth_manager.get_current_user()
-        st.header("👥 User Management")
+        st.header("User Management")
         st.markdown("Manage user accounts, roles, and permissions")
         
         # Log access to user management
@@ -924,7 +1209,7 @@ class LawFirmAIApp:
         )
         
         # User management tabs
-        tab1, tab2, tab3 = st.tabs(["👥 Manage Users", "➕ Add User", "📊 User Stats"])
+        tab1, tab2, tab3 = st.tabs(["Manage Users", "Add User", "User Statistics"])
         
         with tab1:
             self._render_users_list()
@@ -956,15 +1241,15 @@ class LawFirmAIApp:
                     st.caption(f"Created: {created_date}")
                 
                 with col2:
-                    role_color = "🔑" if user['role'] == 'admin' else "👤"
-                    st.markdown(f"{role_color} {user['role'].title()}")
+                    role_badge = "[Admin]" if user['role'] == 'admin' else "[User]"
+                    st.markdown(f"{role_badge} {user['role'].title()}")
                 
                 with col3:
                     # Account status
                     if user.get('failed_login_attempts', 0) >= 5:
-                        st.error("🔒 Locked")
+                        st.error("Locked")
                     else:
-                        st.success("✅ Active")
+                        st.success("Active")
                 
                 with col4:
                     # Last login
@@ -980,7 +1265,7 @@ class LawFirmAIApp:
                     
                     with action_col1:
                         # Change role button
-                        if st.button("🔄", key=f"role_{user['id']}", help="Change Role"):
+                        if st.button("Change Role", key=f"role_{user['id']}", help="Change Role"):
                             st.session_state[f'change_role_{user["id"]}'] = True
                             st.rerun()
                     
@@ -1004,7 +1289,7 @@ class LawFirmAIApp:
                         current_admin = self.auth_manager.get_current_user()
                         can_delete = user['username'] != current_admin['username']  # Can't delete self
                         
-                        if st.button("🗑️", key=f"delete_{user['id']}", 
+                        if st.button("Delete", key=f"delete_{user['id']}", 
                                    help="Delete User" if can_delete else "Cannot delete yourself",
                                    disabled=not can_delete):
                             st.session_state[f'confirm_delete_{user["id"]}'] = True
@@ -1024,7 +1309,7 @@ class LawFirmAIApp:
                         
                         col_submit, col_cancel = st.columns(2)
                         with col_submit:
-                            if st.form_submit_button("✅ Confirm"):
+                            if st.form_submit_button("Confirm"):
                                 success = self.db_manager.change_user_role(
                                     user['id'], new_role,
                                     self.auth_manager.get_current_user()['username'],
@@ -1038,18 +1323,18 @@ class LawFirmAIApp:
                                 st.rerun()
                         
                         with col_cancel:
-                            if st.form_submit_button("❌ Cancel"):
+                            if st.form_submit_button("Cancel"):
                                 st.session_state[f'change_role_{user["id"]}'] = False
                                 st.rerun()
                 
                 # Delete confirmation dialog
                 if st.session_state.get(f'confirm_delete_{user["id"]}', False):
-                    st.error(f"⚠️ **Delete user '{user['username']}'?**")
+                    st.error(f"**Delete user '{user['username']}'?**")
                     st.write("This action cannot be undone.")
                     
                     col_confirm, col_cancel = st.columns(2)
                     with col_confirm:
-                        if st.button("🗑️ Delete", key=f"confirm_delete_{user['id']}"):
+                        if st.button("Delete", key=f"confirm_delete_{user['id']}"):
                             success = self.db_manager.delete_user(
                                 user['id'],
                                 self.auth_manager.get_current_user()['username'],
@@ -1063,7 +1348,7 @@ class LawFirmAIApp:
                             st.rerun()
                     
                     with col_cancel:
-                        if st.button("❌ Cancel", key=f"cancel_delete_{user['id']}"):
+                        if st.button("Cancel", key=f"cancel_delete_{user['id']}"):
                             st.session_state[f'confirm_delete_{user["id"]}'] = False
                             st.rerun()
                 
@@ -1104,7 +1389,7 @@ class LawFirmAIApp:
                 placeholder="Confirm password"
             )
             
-            submit_button = st.form_submit_button("➕ Create User", use_container_width=True)
+            submit_button = st.form_submit_button("Create User", use_container_width=True)
             
             if submit_button:
                 # Validation
@@ -1127,15 +1412,14 @@ class LawFirmAIApp:
                     )
                     
                     if success:
-                        st.success(f"✅ User '{new_username}' created successfully with role '{new_role}'")
-                        st.balloons()
+                        st.success(f"User '{new_username}' created successfully with role '{new_role}'")
                         # Clear form by rerunning
                         st.rerun()
                     else:
-                        st.error("❌ Failed to create user. Username may already exist.")
+                        st.error("Failed to create user. Username may already exist.")
         
         # Password guidelines
-        with st.expander("💡 Password Security Guidelines"):
+        with st.expander("Password Security Guidelines"):
             st.markdown("""
             **Strong Password Requirements:**
             - Minimum 8 characters length
@@ -1187,8 +1471,8 @@ class LawFirmAIApp:
         if recent_logs:
             for log in recent_logs[:5]:  # Show last 5 login events
                 timestamp = log['timestamp'][:19] if log['timestamp'] else 'Unknown'
-                status_icon = "✅" if log['status'] == 'success' else "❌"
-                st.text(f"{status_icon} {log['username']} - {timestamp}")
+                status_text = "[Success]" if log['status'] == 'success' else "[Failed]"
+                st.text(f"{status_text} {log['username']} - {timestamp}")
         else:
             st.info("No recent login activity.")
     

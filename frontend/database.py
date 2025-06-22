@@ -152,12 +152,45 @@ class DatabaseManager:
                     )
                 """)
                 
+                # Chat sessions table
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS chat_sessions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER NOT NULL,
+                        title TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        message_count INTEGER DEFAULT 0,
+                        FOREIGN KEY (user_id) REFERENCES users (id)
+                    )
+                """)
+                
+                # Chat messages table
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS chat_messages (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        session_id INTEGER NOT NULL,
+                        role TEXT CHECK(role IN ('user', 'assistant')) NOT NULL,
+                        content TEXT NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        sources TEXT,
+                        token_count INTEGER,
+                        FOREIGN KEY (session_id) REFERENCES chat_sessions (id) ON DELETE CASCADE
+                    )
+                """)
+                
                 # Create indexes for performance
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_logs(timestamp)")
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_user_id ON audit_logs(user_id)")
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_action_type ON audit_logs(action_type)")
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_status ON audit_logs(status)")
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_username ON audit_logs(username)")
+                
+                # Chat indexes for performance
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_id ON chat_sessions(user_id)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_sessions_created_at ON chat_sessions(created_at)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_messages_session_id ON chat_messages(session_id)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_messages_created_at ON chat_messages(created_at)")
                 
                 # Migrate old audit_log table if it exists
                 cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='audit_log'")
@@ -890,4 +923,243 @@ class DatabaseManager:
                 
         except Exception as error:
             logger.error(f"Error resetting failed login attempts: {error}")
-            return False 
+            return False
+    
+    # Chat History Management Methods
+    
+    def create_chat_session(self, user_id: int, title: str = None) -> Optional[int]:
+        """Create a new chat session for a user"""
+        try:
+            # Generate default title if none provided
+            if not title:
+                from datetime import datetime
+                title = f"Chat on {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO chat_sessions (user_id, title, created_at, updated_at)
+                    VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, (user_id, title))
+                
+                session_id = cursor.lastrowid
+                conn.commit()
+                
+                logger.info(f"Created new chat session {session_id} for user {user_id}")
+                return session_id
+                
+        except Exception as error:
+            logger.error(f"Error creating chat session: {error}")
+            return None
+    
+    def get_user_chat_sessions(self, user_id: int, limit: int = 50) -> List[Dict[str, Any]]:
+        """Get all chat sessions for a user, ordered by most recent"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT id, title, created_at, updated_at, message_count
+                    FROM chat_sessions
+                    WHERE user_id = ?
+                    ORDER BY updated_at DESC
+                    LIMIT ?
+                """, (user_id, limit))
+                
+                sessions = []
+                for row in cursor.fetchall():
+                    sessions.append({
+                        'id': row['id'],
+                        'title': row['title'],
+                        'created_at': row['created_at'],
+                        'updated_at': row['updated_at'],
+                        'message_count': row['message_count'] or 0
+                    })
+                
+                return sessions
+                
+        except Exception as error:
+            logger.error(f"Error retrieving chat sessions: {error}")
+            return []
+    
+    def get_chat_messages(self, session_id: int, user_id: int) -> List[Dict[str, Any]]:
+        """Get all messages for a chat session (with user verification)"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # First verify the session belongs to the user
+                cursor.execute("""
+                    SELECT id FROM chat_sessions 
+                    WHERE id = ? AND user_id = ?
+                """, (session_id, user_id))
+                
+                if not cursor.fetchone():
+                    logger.warning(f"User {user_id} attempted to access chat session {session_id} they don't own")
+                    return []
+                
+                # Get messages
+                cursor.execute("""
+                    SELECT id, role, content, created_at, sources, token_count
+                    FROM chat_messages
+                    WHERE session_id = ?
+                    ORDER BY created_at ASC
+                """, (session_id,))
+                
+                messages = []
+                for row in cursor.fetchall():
+                    message = {
+                        'id': row['id'],
+                        'role': row['role'],
+                        'content': row['content'],
+                        'created_at': row['created_at'],
+                        'token_count': row['token_count']
+                    }
+                    
+                    # Parse sources if available
+                    if row['sources']:
+                        try:
+                            import json
+                            message['sources'] = json.loads(row['sources'])
+                        except:
+                            message['sources'] = []
+                    else:
+                        message['sources'] = []
+                    
+                    messages.append(message)
+                
+                return messages
+                
+        except Exception as error:
+            logger.error(f"Error retrieving chat messages: {error}")
+            return []
+    
+    def add_chat_message(self, session_id: int, user_id: int, role: str, content: str, 
+                        sources: List[str] = None, token_count: int = None) -> bool:
+        """Add a message to a chat session"""
+        try:
+            if role not in ['user', 'assistant']:
+                logger.error(f"Invalid role: {role}")
+                return False
+            
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Verify session belongs to user
+                cursor.execute("""
+                    SELECT id FROM chat_sessions 
+                    WHERE id = ? AND user_id = ?
+                """, (session_id, user_id))
+                
+                if not cursor.fetchone():
+                    logger.warning(f"User {user_id} attempted to add message to session {session_id} they don't own")
+                    return False
+                
+                # Prepare sources
+                sources_json = None
+                if sources:
+                    import json
+                    sources_json = json.dumps(sources)
+                
+                # Add message
+                cursor.execute("""
+                    INSERT INTO chat_messages (session_id, role, content, sources, token_count, created_at)
+                    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """, (session_id, role, content, sources_json, token_count))
+                
+                # Update session updated_at and message count
+                cursor.execute("""
+                    UPDATE chat_sessions 
+                    SET updated_at = CURRENT_TIMESTAMP,
+                        message_count = (
+                            SELECT COUNT(*) FROM chat_messages WHERE session_id = ?
+                        )
+                    WHERE id = ?
+                """, (session_id, session_id))
+                
+                conn.commit()
+                return True
+                
+        except Exception as error:
+            logger.error(f"Error adding chat message: {error}")
+            return False
+    
+    def delete_chat_session(self, session_id: int, user_id: int) -> bool:
+        """Delete a chat session and all its messages (with user verification)"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Verify session belongs to user
+                cursor.execute("""
+                    SELECT title FROM chat_sessions 
+                    WHERE id = ? AND user_id = ?
+                """, (session_id, user_id))
+                
+                session_info = cursor.fetchone()
+                if not session_info:
+                    logger.warning(f"User {user_id} attempted to delete session {session_id} they don't own")
+                    return False
+                
+                # Delete session (messages will cascade delete)
+                cursor.execute("DELETE FROM chat_sessions WHERE id = ?", (session_id,))
+                
+                if cursor.rowcount > 0:
+                    conn.commit()
+                    logger.info(f"Deleted chat session {session_id} ({session_info['title']}) for user {user_id}")
+                    return True
+                else:
+                    return False
+                
+        except Exception as error:
+            logger.error(f"Error deleting chat session: {error}")
+            return False
+    
+    def update_chat_session_title(self, session_id: int, user_id: int, new_title: str) -> bool:
+        """Update the title of a chat session"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Verify session belongs to user and update
+                cursor.execute("""
+                    UPDATE chat_sessions 
+                    SET title = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ? AND user_id = ?
+                """, (new_title, session_id, user_id))
+                
+                if cursor.rowcount > 0:
+                    conn.commit()
+                    return True
+                else:
+                    logger.warning(f"User {user_id} attempted to update title of session {session_id} they don't own")
+                    return False
+                
+        except Exception as error:
+            logger.error(f"Error updating chat session title: {error}")
+            return False
+    
+    def get_chat_session_info(self, session_id: int, user_id: int) -> Optional[Dict[str, Any]]:
+        """Get information about a specific chat session"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT id, title, created_at, updated_at, message_count
+                    FROM chat_sessions
+                    WHERE id = ? AND user_id = ?
+                """, (session_id, user_id))
+                
+                row = cursor.fetchone()
+                if row:
+                    return {
+                        'id': row['id'],
+                        'title': row['title'],
+                        'created_at': row['created_at'],
+                        'updated_at': row['updated_at'],
+                        'message_count': row['message_count'] or 0
+                    }
+                return None
+                
+        except Exception as error:
+            logger.error(f"Error retrieving chat session info: {error}")
+            return None 

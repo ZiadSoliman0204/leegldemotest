@@ -370,7 +370,7 @@ class AuthManager:
                 help="Enter your secure password"
             )
             
-            login_submitted = st.form_submit_button("🔑 Sign In", use_container_width=True)
+            login_submitted = st.form_submit_button("Sign In", use_container_width=True)
             
             if login_submitted:
                 if not username or not password:
@@ -425,8 +425,8 @@ class AuthManager:
             st.markdown("---")
             
             # User info with role badge
-            role_badge = "🔑 Admin" if current_user['role'] == 'admin' else "👤 User"
-            st.markdown(f"**👋 {current_user['username']}**")
+            role_badge = "[Admin]" if current_user['role'] == 'admin' else "[User]"
+            st.markdown(f"**Welcome, {current_user['username']}**")
             st.markdown(f"**Role:** {role_badge}")
             
             # Show session info
