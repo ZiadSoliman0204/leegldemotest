@@ -89,7 +89,9 @@ class LawFirmAIApp:
             'current_chat_session_id': None,
             'chat_sessions': [],
             'chat_sessions_loaded': False,
-            'chat_history_needs_refresh': False
+            'chat_history_needs_refresh': False,
+            # Document selection for context
+            'selected_document_ids': []
         }
         
         for key, value in default_values.items():
@@ -107,8 +109,48 @@ class LawFirmAIApp:
         except Exception:
             st.session_state.api_status = "offline"
     
+    def refresh_all_data(self):
+        """Refresh all application data - useful when API was offline"""
+        with st.spinner("Refreshing application data..."):
+            # Check API health
+            self.check_api_health()
+            
+            # Reset chat-related states
+            st.session_state.chat_history_needs_refresh = True
+            st.session_state.chat_sessions_loaded = False
+            
+            # Refresh document list
+            st.session_state.documents_uploaded = []
+            if st.session_state.api_status == "online":
+                self.load_document_list()
+            
+            # Clear document list cache if it exists
+            if 'documents_list' in st.session_state:
+                del st.session_state['documents_list']
+            
+            # Clear any cached analytics data
+            if 'analytics_data' in st.session_state:
+                del st.session_state['analytics_data']
+            
+            # Clear audit logs cache
+            if 'audit_logs_cache' in st.session_state:
+                del st.session_state['audit_logs_cache']
+            
+            # Clear user management cache
+            if 'users_list' in st.session_state:
+                del st.session_state['users_list']
+        
+        # Show success message
+        if st.session_state.api_status == "online":
+            st.success("✅ Data refreshed successfully! API is now online.")
+        else:
+            st.warning("⚠️ Data refresh completed, but API is still offline.")
+        
+        # Force a rerun to refresh the UI
+        st.rerun()
+    
     def render_header(self):
-        """Render application header"""
+        """Render clean application header"""
         st.markdown("""
         <div class="main-header">
             <h1>Legal AI Assistant</h1>
@@ -117,11 +159,18 @@ class LawFirmAIApp:
         """, unsafe_allow_html=True)
     
     def render_api_status(self):
-        """Render API connection status"""
+        """Render API connection status with refresh option"""
         if st.session_state.api_status == "online":
             self.theme_manager.render_status_indicator("online", "API Connected")
         else:
             self.theme_manager.render_status_indicator("offline", "API Disconnected")
+            
+            # Show refresh button when API is offline
+            if st.button("Retry Connection", 
+                        help="Refresh and check API connection again", 
+                        use_container_width=True,
+                        type="primary"):
+                self.refresh_all_data()
     
     def render_navigation(self):
         """Render navigation menu with chat history"""
@@ -153,7 +202,7 @@ class LawFirmAIApp:
                     st.rerun()
     
     def render_chat_history_sidebar(self):
-        """Render chat history in sidebar"""
+        """Render chat history in sidebar with improved UI"""
         current_user = self.auth_manager.get_current_user()
         if not current_user:
             return
@@ -166,14 +215,14 @@ class LawFirmAIApp:
             st.session_state.chat_sessions_loaded = True
             st.session_state.chat_history_needs_refresh = False
         
-        # New Chat button
-        col1, col2 = st.columns([3, 1])
+        # Action buttons - optimized layout
+        col1, col2 = st.columns([2, 1])
         with col1:
             if st.button("New Chat", use_container_width=True, type="primary"):
                 self.start_new_chat()
         
         with col2:
-            if st.button("Refresh", help="Refresh chat list"):
+            if st.button("Refresh", help="Refresh chat list", use_container_width=True):
                 st.session_state.chat_history_needs_refresh = True
                 st.rerun()
         
@@ -190,43 +239,415 @@ class LawFirmAIApp:
         if st.session_state.chat_sessions:
             st.markdown("**Recent Chats:**")
             
+            # Add custom CSS for better chat item styling and ultra-compact layout
+            st.markdown("""
+            <style>
+            .chat-item {
+                border-radius: 6px;
+                padding: 2px 4px;
+                margin: 0.5px 0;
+                background-color: rgba(0,0,0,0.02);
+                position: relative;
+            }
+            .chat-item:hover {
+                background-color: rgba(0,0,0,0.05);
+                transition: background-color 0.2s;
+            }
+            .current-chat {
+                border-left: 3px solid #00d4aa;
+                background-color: rgba(0,212,170,0.08);
+            }
+            /* Ultra compact styling for better space usage */
+            .stButton > button {
+                padding: 0.15rem 0.3rem !important;
+                font-size: 0.8rem !important;
+                margin: 0 !important;
+                border-radius: 4px !important;
+                min-height: 24px !important;
+            }
+            
+            /* Compact columns with minimal spacing */
+            div[data-testid="column"] {
+                padding: 0 1px !important;
+            }
+            
+            /* Reduce space between elements */
+            .element-container {
+                margin-bottom: 0.1rem !important;
+            }
+            
+            /* Make chat history more compact */
+            .chat-history-container {
+                padding: 1px 0;
+            }
+            
+            /* Compact menu buttons */
+            .menu-buttons {
+                gap: 1px;
+                display: flex;
+                flex-wrap: nowrap;
+            }
+            
+            /* Reduce separator spacing */
+            hr {
+                margin: 0.2rem 0 !important;
+            }
+            
+            /* Minimize container spacing */
+            .block-container {
+                padding-top: 1rem !important;
+                padding-bottom: 0.5rem !important;
+            }
+            
+            /* Make containers tighter */
+            div[data-testid="stVerticalBlock"] > div {
+                gap: 0.1rem !important;
+            }
+            
+            /* Ultra-compact chat buttons */
+            .stButton {
+                margin-bottom: 0.1rem !important;
+            }
+            
+
+            </style>
+            """, unsafe_allow_html=True)
+            
             for session in st.session_state.chat_sessions[:10]:  # Show last 10 chats
-                # Format timestamp
-                try:
-                    from datetime import datetime
-                    created_time = datetime.fromisoformat(session['created_at'])
-                    time_str = created_time.strftime("%m/%d %H:%M")
-                except:
-                    time_str = "Unknown"
-                
-                # Chat item container
-                with st.container():
-                    col_title, col_action = st.columns([4, 1])
-                    
-                    with col_title:
-                        # Truncate long titles
-                        title = session['title']
-                        if len(title) > 25:
-                            title = title[:22] + "..."
-                        
-                        # Different style for current session
-                        if session['id'] == st.session_state.current_chat_session_id:
-                            st.markdown(f"**• {title}**")
-                        else:
-                            if st.button(f"{title}", key=f"chat_{session['id']}", use_container_width=True):
-                                self.load_chat_session(session['id'])
-                        
-                        st.caption(f"{time_str} • {session['message_count']} msgs")
-                    
-                    with col_action:
-                        # Delete button
-                        if st.button("Delete", key=f"del_{session['id']}", help="Delete chat"):
-                            if self.delete_chat_session(session['id']):
-                                st.rerun()
-                
-                st.markdown("---")
+                self._render_chat_item(session, current_user)
         else:
             st.info("No previous chats. Start a new conversation!")
+    
+    def _render_chat_item(self, session: dict, current_user: dict):
+        """Render individual chat item with 3-dots menu"""
+        session_id = session['id']
+        
+        # Proper horizontal alignment: title left, menu button right
+        col1, col2 = st.columns([6, 1])
+        
+        with col1:
+            # Chat title and click action
+            title = session['title']
+            is_current = session_id == st.session_state.current_chat_session_id
+            
+            # Truncate very long titles for better display in sidebar
+            display_title = title if len(title) <= 25 else title[:22] + "..."
+            
+            # Different styling for current vs other sessions
+            if is_current:
+                st.markdown(f"**• {display_title}** (Active)")
+            else:
+                if st.button(display_title, key=f"chat_{session_id}", use_container_width=True, type="secondary"):
+                    self.load_chat_session(session_id)
+        
+        with col2:
+            # 3-dots menu button aligned to the right
+            show_menu_key = f"show_menu_{session_id}"
+            
+            # Initialize menu state if not exists
+            if show_menu_key not in st.session_state:
+                st.session_state[show_menu_key] = False
+            
+            # Three-dot menu button
+            if st.button("⋯", 
+                        key=f"options_{session_id}", 
+                        help="More options", 
+                        type="secondary",
+                        use_container_width=True):
+                # Toggle this menu
+                st.session_state[show_menu_key] = not st.session_state[show_menu_key]
+                
+                # Close all other menus
+                for other_session in st.session_state.chat_sessions:
+                    other_key = f"show_menu_{other_session['id']}"
+                    if other_key != show_menu_key and other_key in st.session_state:
+                        st.session_state[other_key] = False
+        
+        # Show inline menu options if this menu is open
+        if st.session_state.get(show_menu_key, False):
+            with st.container():
+                # Menu options as buttons in a compact layout
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    if st.button("Rename", key=f"rename_btn_{session_id}", use_container_width=True, type="secondary"):
+                        st.session_state[f"rename_mode_{session_id}"] = True
+                        st.session_state[show_menu_key] = False
+                        st.rerun()
+                
+                with col2:
+                    if st.button("Delete", key=f"delete_btn_{session_id}", use_container_width=True, type="secondary"):
+                        st.session_state[f"delete_mode_{session_id}"] = True
+                        st.session_state[show_menu_key] = False
+                        st.rerun()
+                
+                with col3:
+                    if st.button("Details", key=f"details_btn_{session_id}", use_container_width=True, type="secondary"):
+                        st.session_state[f"details_mode_{session_id}"] = True
+                        st.session_state[show_menu_key] = False
+                        st.rerun()
+        
+        # Handle different modes
+        if st.session_state.get(f"rename_mode_{session_id}", False):
+            self._handle_rename_chat(session_id, session['title'], current_user)
+        elif st.session_state.get(f"delete_mode_{session_id}", False):
+            self._handle_delete_chat(session_id, session['title'])
+        elif st.session_state.get(f"details_mode_{session_id}", False):
+            self._show_chat_details(session)
+        
+        # Add minimal separator between chat items
+        st.markdown('<hr style="margin: 0.1rem 0; border: 0.3px solid rgba(0,0,0,0.08);">', unsafe_allow_html=True)
+    
+    def _handle_rename_chat(self, session_id: int, current_title: str, current_user: dict):
+        """Handle chat renaming with a text input dialog"""
+        with st.container():
+            st.markdown("### Rename Chat")
+            
+            # Initialize the input value if not exists
+            input_key = f"title_input_{session_id}"
+            if input_key not in st.session_state:
+                st.session_state[input_key] = current_title
+            
+            new_title = st.text_input(
+                "New title:",
+                value=st.session_state[input_key],
+                key=f"title_input_live_{session_id}",
+                max_chars=100,
+                placeholder="Enter new chat title..."
+            )
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Save", key=f"save_{session_id}", type="primary", use_container_width=True):
+                    if new_title.strip() and new_title != current_title:
+                        success = self.db_manager.update_chat_session_title(
+                            session_id, current_user['id'], new_title.strip()
+                        )
+                        if success:
+                            # Log the rename action
+                            self.db_manager.log_audit_event(
+                                user_id=current_user['id'],
+                                username=current_user['username'],
+                                action_type="CHAT_SESSION_RENAMED",
+                                resource=f"chat_session:{session_id}",
+                                status="success",
+                                details=f"Chat renamed from '{current_title}' to '{new_title.strip()}'",
+                                ip_address=self._get_client_ip(),
+                                session_id=self.session_id,
+                                severity_level="INFO"
+                            )
+                            
+                            st.success("Chat renamed successfully!")
+                            st.session_state.chat_history_needs_refresh = True
+                            # Clear the rename mode
+                            if f"rename_mode_{session_id}" in st.session_state:
+                                del st.session_state[f"rename_mode_{session_id}"]
+                            st.rerun()
+                        else:
+                            st.error("Failed to rename chat")
+                    elif not new_title.strip():
+                        st.error("Title cannot be empty")
+                    else:
+                        st.info("No changes made")
+            
+            with col2:
+                if st.button("Cancel", key=f"cancel_rename_{session_id}", use_container_width=True):
+                    # Clear the rename mode
+                    if f"rename_mode_{session_id}" in st.session_state:
+                        del st.session_state[f"rename_mode_{session_id}"]
+                    st.rerun()
+    
+    def _show_chat_details(self, session: dict):
+        """Show comprehensive chat session details in tabulated format"""
+        with st.container():
+            st.markdown("### Chat Details")
+            
+            # Get additional details like last message
+            current_user = self.auth_manager.get_current_user()
+            session_id = session['id']
+            
+            # Get messages to find the last message
+            messages = self.db_manager.get_chat_messages(session_id, current_user['id'])
+            last_message = ""
+            last_message_time = ""
+            
+            if messages and len(messages) > 0:
+                last_msg = messages[-1]  # Get the last message
+                last_message = last_msg['content'][:100] + "..." if len(last_msg['content']) > 100 else last_msg['content']
+                try:
+                    from datetime import datetime
+                    msg_time = datetime.fromisoformat(last_msg['created_at'])
+                    last_message_time = msg_time.strftime("%m/%d %H:%M")
+                except:
+                    last_message_time = "Unknown"
+            
+            # Format creation and update times
+            try:
+                from datetime import datetime
+                created = datetime.fromisoformat(session['created_at'])
+                updated = datetime.fromisoformat(session['updated_at'])
+                created_str = created.strftime("%m/%d %H:%M")
+                updated_str = updated.strftime("%m/%d %H:%M")
+                created_full = created.strftime("%Y-%m-%d %H:%M:%S")
+                updated_full = updated.strftime("%Y-%m-%d %H:%M:%S")
+                
+                # Calculate metrics
+                days_ago = (datetime.now() - created).days
+                hours_ago = int((datetime.now() - updated).total_seconds() / 3600)
+            except:
+                created_str = "Unknown"
+                updated_str = "Unknown"
+                created_full = "Unknown"
+                updated_full = "Unknown"
+                days_ago = "Unknown"
+                hours_ago = "Unknown"
+            
+            # Create tabulated view using pandas DataFrame
+            import pandas as pd
+            
+            # Basic information table
+            basic_info = pd.DataFrame({
+                'Property': ['Chat Title', 'Session ID', 'Message Count', 'Days Old', 'Hours Since Update'],
+                'Value': [
+                    session['title'],
+                    str(session['id']),
+                    f"{session['message_count']} message{'s' if session['message_count'] != 1 else ''}",
+                    str(days_ago),
+                    str(hours_ago)
+                ]
+            })
+            
+            st.markdown("**Basic Information:**")
+            st.dataframe(basic_info, hide_index=True, use_container_width=True)
+            
+            # Timestamps table
+            timestamps = pd.DataFrame({
+                'Event': ['Created', 'Last Updated', 'Last Message'],
+                'Short Format': [created_str, updated_str, last_message_time if last_message_time else "No messages"],
+                'Full Format': [created_full, updated_full, last_message_time if last_message_time else "No messages"]
+            })
+            
+            st.markdown("**Timestamps:**")
+            st.dataframe(timestamps, hide_index=True, use_container_width=True)
+            
+            # Last message table (if exists)
+            if last_message:
+                message_info = pd.DataFrame({
+                    'Aspect': ['Time', 'Content Preview'],
+                    'Details': [last_message_time, last_message]
+                })
+                
+                st.markdown("**Last Message:**")
+                st.dataframe(message_info, hide_index=True, use_container_width=True)
+            else:
+                st.info("No messages in this chat session yet.")
+            
+            # Display metrics as a summary table
+            metrics_data = pd.DataFrame({
+                'Metric': ['Total Messages', 'Chat Age (Days)', 'Last Activity (Hours Ago)'],
+                'Value': [
+                    session['message_count'],
+                    days_ago if days_ago != "Unknown" else 0,
+                    hours_ago if hours_ago != "Unknown" else 0
+                ]
+            })
+            
+            st.markdown("**Quick Stats:**")
+            st.dataframe(metrics_data, hide_index=True, use_container_width=True)
+            
+            if st.button("Close Details", key=f"close_details_{session['id']}", use_container_width=True):
+                # Clear the details mode
+                if f"details_mode_{session['id']}" in st.session_state:
+                    del st.session_state[f"details_mode_{session['id']}"]
+                st.rerun()
+    
+    def _export_chat_session(self, session_id: int) -> bool:
+        """Export a specific chat session to JSON"""
+        try:
+            current_user = st.session_state.user
+            
+            # Get chat session details
+            session = self.db_manager.get_chat_session(session_id, current_user['id'])
+            if not session:
+                return False
+            
+            # Get messages for this session
+            messages = self.db_manager.get_chat_messages(session_id, current_user['id'])
+            
+            # Format for export
+            export_data = {
+                "session_id": session_id,
+                "title": session['title'],
+                "created_at": session['created_at'],
+                "updated_at": session['updated_at'],
+                "message_count": len(messages),
+                "messages": [
+                    {
+                        "role": msg['role'],
+                        "content": msg['content'],
+                        "timestamp": msg['created_at'],
+                        "sources": msg.get('sources', [])
+                    }
+                    for msg in messages
+                ]
+            }
+            
+            # Create download
+            import json
+            from datetime import datetime
+            
+            json_str = json.dumps(export_data, indent=2, ensure_ascii=False)
+            filename = f"chat_export_{session_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            
+            st.download_button(
+                label="📥 Download Chat Export",
+                data=json_str,
+                file_name=filename,
+                mime="application/json",
+                key=f"download_{session_id}_{datetime.now().timestamp()}"
+            )
+            
+            return True
+            
+        except Exception as e:
+            st.error(f"Export failed: {str(e)}")
+            return False
+    
+    def _handle_delete_chat(self, session_id: int, title: str):
+        """Handle chat deletion with confirmation"""
+        with st.container():
+            st.markdown("### Delete Chat")
+            
+            # Truncate title for display if too long
+            display_title = title if len(title) <= 40 else title[:37] + "..."
+            
+            st.error(f"""
+            **Are you sure you want to delete this chat?**
+            
+            **Title:** {display_title}  
+            **ID:** {session_id}
+            
+            **This action cannot be undone!**
+            """)
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("DELETE", key=f"confirm_delete_{session_id}", type="primary", use_container_width=True):
+                    if self.delete_chat_session(session_id):
+                        st.success("Chat deleted successfully!")
+                        # Clear the delete mode
+                        if f"delete_mode_{session_id}" in st.session_state:
+                            del st.session_state[f"delete_mode_{session_id}"]
+                        st.rerun()
+                    else:
+                        st.error("Failed to delete chat")
+            
+            with col2:
+                if st.button("Cancel", key=f"cancel_delete_{session_id}", use_container_width=True):
+                    # Clear the delete mode
+                    if f"delete_mode_{session_id}" in st.session_state:
+                        del st.session_state[f"delete_mode_{session_id}"]
+                    st.rerun()
     
     def render_settings_sidebar(self):
         """Render settings in sidebar"""
@@ -261,7 +682,7 @@ class LawFirmAIApp:
     # Chat History Management Methods
     
     def start_new_chat(self):
-        """Start a new chat session"""
+        """Start a new chat session and redirect to chat view"""
         current_user = self.auth_manager.get_current_user()
         if not current_user:
             st.error("Please log in to start a new chat")
@@ -276,6 +697,9 @@ class LawFirmAIApp:
             st.session_state.current_chat_session_id = session_id
             st.session_state.chat_history_needs_refresh = True
             
+            # Redirect to chat view regardless of current page
+            st.session_state.current_view = 'chat'
+            
             # Log the new chat session
             self.db_manager.log_audit_event(
                 user_id=current_user['id'],
@@ -283,7 +707,7 @@ class LawFirmAIApp:
                 action_type="CHAT_SESSION_CREATED",
                 resource=f"chat_session:{session_id}",
                 status="success",
-                details="New chat session created",
+                details="New chat session created and redirected to chat view",
                 ip_address=self._get_client_ip(),
                 session_id=self.session_id,
                 severity_level="INFO"
@@ -295,7 +719,7 @@ class LawFirmAIApp:
             st.error("Failed to create new chat session")
     
     def load_chat_session(self, session_id: int):
-        """Load an existing chat session"""
+        """Load an existing chat session and redirect to chat view"""
         current_user = self.auth_manager.get_current_user()
         if not current_user:
             return
@@ -315,6 +739,9 @@ class LawFirmAIApp:
             
             st.session_state.current_chat_session_id = session_id
             
+            # Redirect to chat view regardless of current page
+            st.session_state.current_view = 'chat'
+            
             # Log session access
             self.db_manager.log_audit_event(
                 user_id=current_user['id'],
@@ -322,7 +749,7 @@ class LawFirmAIApp:
                 action_type="CHAT_SESSION_LOADED",
                 resource=f"chat_session:{session_id}",
                 status="success",
-                details=f"Loaded chat session with {len(messages)} messages",
+                details=f"Loaded chat session with {len(messages)} messages and redirected to chat view",
                 ip_address=self._get_client_ip(),
                 session_id=self.session_id,
                 severity_level="INFO"
@@ -542,12 +969,18 @@ class LawFirmAIApp:
     
     def _build_chat_payload(self, message: str) -> Dict[str, Any]:
         """Build the payload for chat API request"""
-        return {
+        payload = {
             "message": message,
             "use_rag": st.session_state.use_rag,
             "max_tokens": st.session_state.max_tokens,
             "temperature": st.session_state.temperature
         }
+        
+        # Add selected document IDs if any are selected
+        if st.session_state.selected_document_ids:
+            payload["selected_document_ids"] = st.session_state.selected_document_ids
+        
+        return payload
     
     def _make_api_request(self, payload: Dict[str, Any]) -> requests.Response:
         """Make the actual API request"""
@@ -644,9 +1077,64 @@ class LawFirmAIApp:
         # Log successful response
         self.auth_manager.log_user_action("CHAT_RESPONSE", "Received AI response")
     
+    def render_document_selection(self):
+        """Render document selection interface for context filtering"""
+        # Load documents if not already loaded
+        if not st.session_state.documents_uploaded:
+            self.load_document_list()
+        
+        if st.session_state.documents_uploaded:
+            # Document context selection
+            with st.expander("Document Context Selection", expanded=False):
+                st.markdown("**Select specific documents to use as context for your questions:**")
+                
+                # Create document options for multiselect
+                document_options = {}
+                for doc in st.session_state.documents_uploaded:
+                    doc_id = doc.get('document_id')
+                    filename = doc.get('filename', 'Unknown')
+                    chunk_count = doc.get('chunk_count', 0)
+                    
+                    # Create a user-friendly display name
+                    display_name = f"{filename} ({chunk_count} chunks)"
+                    document_options[display_name] = doc_id
+                
+                # Multiselect for document selection
+                selected_display_names = st.multiselect(
+                    "Choose documents (leave empty to search all documents):",
+                    options=list(document_options.keys()),
+                    default=[],
+                    help="Select one or more documents to focus the AI's context. If none selected, all documents will be searched."
+                )
+                
+                # Update session state with selected document IDs
+                st.session_state.selected_document_ids = [
+                    document_options[name] for name in selected_display_names
+                ]
+                
+                # Show current selection summary
+                if st.session_state.selected_document_ids:
+                    selected_count = len(st.session_state.selected_document_ids)
+                    total_count = len(st.session_state.documents_uploaded)
+                    
+                    st.success(f"Context: {selected_count} of {total_count} documents selected")
+                    
+                    # Show selected documents in a compact format
+                    selected_names = [name.split(' (')[0] for name in selected_display_names]  # Remove chunk count
+                    if selected_names:
+                        st.markdown("**Selected:** " + ", ".join(selected_names))
+                else:
+                    st.info("Context: All uploaded documents will be searched")
+        else:
+            # No documents available
+            st.info("No documents uploaded yet. Upload documents in the Document Management section to enable context selection.")
+    
     def render_chat_interface(self):
         """Render the main chat interface"""
         st.header("Legal Assistant Chat")
+        
+        # Document selection section
+        self.render_document_selection()
         
         # Chat history container
         chat_container = st.container()
@@ -854,7 +1342,17 @@ class LawFirmAIApp:
     
     def render_document_management(self):
         """Render document management interface"""
-        st.header("Document Management")
+        # Header with refresh button
+        col1, col2 = st.columns([4, 1])
+        with col1:
+            st.header("Document Management")
+        with col2:
+            st.markdown("<br>", unsafe_allow_html=True)  # Add spacing to align with header
+            if st.button("Refresh Documents", 
+                        help="Refresh document list", 
+                        use_container_width=True):
+                self.load_document_list()
+                st.rerun()
         
         # Upload section
         st.subheader("Upload New Document")
@@ -899,7 +1397,19 @@ class LawFirmAIApp:
     
     def render_analytics_dashboard(self):
         """Render analytics dashboard"""
-        st.header("Analytics Dashboard")
+        # Header with refresh button
+        col1, col2 = st.columns([4, 1])
+        with col1:
+            st.header("Analytics Dashboard")
+        with col2:
+            st.markdown("<br>", unsafe_allow_html=True)  # Add spacing to align with header
+            if st.button("Refresh Analytics", 
+                        help="Refresh analytics data", 
+                        use_container_width=True):
+                # Clear cached data and reload
+                if 'analytics_data' in st.session_state:
+                    del st.session_state['analytics_data']
+                st.rerun()
         
         # System metrics
         col1, col2, col3 = st.columns(3)
@@ -1192,8 +1702,42 @@ class LawFirmAIApp:
             return
         
         current_user = self.auth_manager.get_current_user()
-        st.header("User Management")
-        st.markdown("Manage user accounts, roles, and permissions")
+        
+        # Beautiful header with gradient background
+        st.markdown("""
+        <style>
+        .management-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 16px;
+            padding: 32px;
+            margin: 16px 0;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            text-align: center;
+        }
+        
+        .header-title {
+            color: white;
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 12px;
+        }
+        
+        .header-subtitle {
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 1.2rem;
+            font-weight: 400;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        st.markdown("""
+        <div class="management-header">
+            <div class="header-title">User Management</div>
+            <div class="header-subtitle">Manage user accounts, roles, and permissions</div>
+        </div>
+        """, unsafe_allow_html=True)
         
         # Log access to user management
         self.db_manager.log_audit_event(
@@ -1221,7 +1765,84 @@ class LawFirmAIApp:
             self._render_user_statistics()
     
     def _render_users_list(self):
-        """Render the users list with management actions"""
+        """Render the users list with management actions in beautiful card format"""
+        # Add custom CSS for beautiful user cards
+        st.markdown("""
+        <style>
+        .user-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 16px;
+            padding: 24px;
+            margin: 12px 0;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.3s ease;
+        }
+        
+        .user-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+        }
+        
+        .admin-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        
+        .user-normal-card {
+            background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+        }
+        
+        .locked-card {
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
+        }
+        
+        .user-header {
+            color: white;
+            font-size: 1.3rem;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        
+        .user-info {
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 0.9rem;
+            margin-bottom: 4px;
+        }
+        
+        .role-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            margin: 4px 0;
+        }
+        
+        .admin-badge {
+            background: rgba(255, 193, 7, 0.2);
+            color: #ffc107;
+            border: 1px solid rgba(255, 193, 7, 0.3);
+        }
+        
+        .user-badge {
+            background: rgba(40, 167, 69, 0.2);
+            color: #28a745;
+            border: 1px solid rgba(40, 167, 69, 0.3);
+        }
+        
+        .status-active {
+            color: #28a745;
+            font-weight: 600;
+        }
+        
+        .status-locked {
+            color: #dc3545;
+            font-weight: 600;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        
         st.subheader("Current Users")
         
         users = self.db_manager.get_users()
@@ -1230,70 +1851,87 @@ class LawFirmAIApp:
             st.info("No users found.")
             return
         
-        # Users table
+        # Users in beautiful card layout
         for user in users:
+            # Determine card style based on user status and role
+            is_locked = user.get('failed_login_attempts', 0) >= 5
+            is_admin = user['role'] == 'admin'
+            
+            card_class = "locked-card" if is_locked else ("admin-card" if is_admin else "user-normal-card")
+            
             with st.container():
-                col1, col2, col3, col4, col5 = st.columns([3, 1, 1, 1, 2])
+                # User card with gradient background
+                st.markdown(f'<div class="user-card {card_class}">', unsafe_allow_html=True)
+                
+                # Main user info
+                col1, col2, col3 = st.columns([3, 2, 2])
                 
                 with col1:
-                    st.markdown(f"**{user['username']}**")
+                    # User header
+                    st.markdown(f'<div class="user-header">{user["username"]}</div>', unsafe_allow_html=True)
+                    
+                    # Role badge
+                    if is_admin:
+                        st.markdown('<span class="role-badge admin-badge">Admin</span>', unsafe_allow_html=True)
+                    else:
+                        st.markdown('<span class="role-badge user-badge">User</span>', unsafe_allow_html=True)
+                    
+                    # Created date
                     created_date = user['created_at'][:10] if user['created_at'] else 'Unknown'
-                    st.caption(f"Created: {created_date}")
+                    st.markdown(f'<div class="user-info">Created: {created_date}</div>', unsafe_allow_html=True)
                 
                 with col2:
-                    role_badge = "[Admin]" if user['role'] == 'admin' else "[User]"
-                    st.markdown(f"{role_badge} {user['role'].title()}")
-                
-                with col3:
-                    # Account status
-                    if user.get('failed_login_attempts', 0) >= 5:
-                        st.error("Locked")
+                    # Account status with better styling
+                    if is_locked:
+                        st.markdown('<div class="status-locked">Locked</div>', unsafe_allow_html=True)
                     else:
-                        st.success("Active")
-                
-                with col4:
+                        st.markdown('<div class="status-active">Active</div>', unsafe_allow_html=True)
+                    
                     # Last login
                     if user.get('last_login'):
                         last_login = user['last_login'][:10]
-                        st.text(f"Last: {last_login}")
+                        st.markdown(f'<div class="user-info">Last: {last_login}</div>', unsafe_allow_html=True)
                     else:
-                        st.text("Never")
+                        st.markdown('<div class="user-info">Never</div>', unsafe_allow_html=True)
                 
-                with col5:
-                    # Action buttons
-                    action_col1, action_col2, action_col3 = st.columns(3)
+                with col3:
+                    # Action buttons with better styling
+                    st.markdown('<div style="margin-top: 8px;">', unsafe_allow_html=True)
                     
-                    with action_col1:
-                        # Change role button
-                        if st.button("Change Role", key=f"role_{user['id']}", help="Change Role"):
-                            st.session_state[f'change_role_{user["id"]}'] = True
-                            st.rerun()
+                    # Change role button
+                    if st.button("Change Role", key=f"role_{user['id']}", 
+                               help="Change user role", type="secondary"):
+                        st.session_state[f'change_role_{user["id"]}'] = True
+                        st.rerun()
                     
-                    with action_col2:
-                        # Unlock account button
-                        if user.get('failed_login_attempts', 0) >= 5:
-                            if st.button("🔓", key=f"unlock_{user['id']}", help="Unlock Account"):
-                                success = self.db_manager.reset_failed_login_attempts(
-                                    user['id'], 
-                                    self.auth_manager.get_current_user()['username'],
-                                    self._get_client_ip()
-                                )
-                                if success:
-                                    st.success(f"Account unlocked for {user['username']}")
-                                    st.rerun()
-                                else:
-                                    st.error("Failed to unlock account")
+                    # Unlock account button
+                    if is_locked:
+                        if st.button("Unlock", key=f"unlock_{user['id']}", 
+                                   help="Unlock account", type="secondary"):
+                            success = self.db_manager.reset_failed_login_attempts(
+                                user['id'], 
+                                self.auth_manager.get_current_user()['username'],
+                                self._get_client_ip()
+                            )
+                            if success:
+                                st.success(f"Account unlocked for {user['username']}")
+                                st.rerun()
+                            else:
+                                st.error("Failed to unlock account")
                     
-                    with action_col3:
-                        # Delete user button (with protection)
-                        current_admin = self.auth_manager.get_current_user()
-                        can_delete = user['username'] != current_admin['username']  # Can't delete self
-                        
-                        if st.button("Delete", key=f"delete_{user['id']}", 
-                                   help="Delete User" if can_delete else "Cannot delete yourself",
-                                   disabled=not can_delete):
-                            st.session_state[f'confirm_delete_{user["id"]}'] = True
-                            st.rerun()
+                    # Delete user button (with protection)
+                    current_admin = self.auth_manager.get_current_user()
+                    can_delete = user['username'] != current_admin['username']  # Can't delete self
+                    
+                    if st.button("Delete", key=f"delete_{user['id']}", 
+                               help="Delete user" if can_delete else "Cannot delete yourself",
+                               disabled=not can_delete, type="secondary"):
+                        st.session_state[f'confirm_delete_{user["id"]}'] = True
+                        st.rerun()
+                    
+                    st.markdown('</div>', unsafe_allow_html=True)
+                
+                st.markdown('</div>', unsafe_allow_html=True)
                 
                 # Role change dialog
                 if st.session_state.get(f'change_role_{user["id"]}', False):
@@ -1355,10 +1993,70 @@ class LawFirmAIApp:
                 st.markdown("---")
     
     def _render_add_user_form(self):
-        """Render the add user form"""
+        """Render the add user form with beautiful styling"""
+        # Add custom CSS for the form
+        st.markdown("""
+        <style>
+        .form-container {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 16px;
+            padding: 32px;
+            margin: 16px 0;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .form-header {
+            color: white;
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .form-section {
+            margin-bottom: 16px;
+        }
+        
+        .input-label {
+            color: white;
+            font-weight: 500;
+            margin-bottom: 8px;
+            display: block;
+        }
+        
+        .security-info {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 16px;
+            margin-top: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .security-title {
+            color: white;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        
+        .security-item {
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 0.9rem;
+            margin-bottom: 4px;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        
         st.subheader("Add New User")
         
+        # Beautiful form container
+        st.markdown('<div class="form-container">', unsafe_allow_html=True)
+        st.markdown('<div class="form-header">Create New User Account</div>', unsafe_allow_html=True)
+        
         with st.form("add_user_form"):
+            # User details section
+            st.markdown("**User Information**")
             col1, col2 = st.columns(2)
             
             with col1:
@@ -1372,9 +2070,11 @@ class LawFirmAIApp:
                 new_role = st.selectbox(
                     "Role",
                     options=['user', 'admin'],
-                    help="Select user role"
+                    help="Select user role",
+                    format_func=lambda x: x.title()
                 )
             
+            st.markdown("**Security Settings**")
             new_password = st.text_input(
                 "Password",
                 type="password",
@@ -1389,7 +2089,8 @@ class LawFirmAIApp:
                 placeholder="Confirm password"
             )
             
-            submit_button = st.form_submit_button("Create User", use_container_width=True)
+            st.markdown("---")
+            submit_button = st.form_submit_button("Create User", use_container_width=True, type="primary")
             
             if submit_button:
                 # Validation
@@ -1418,19 +2119,100 @@ class LawFirmAIApp:
                     else:
                         st.error("Failed to create user. Username may already exist.")
         
-        # Password guidelines
-        with st.expander("Password Security Guidelines"):
-            st.markdown("""
-            **Strong Password Requirements:**
-            - Minimum 8 characters length
-            - Mix of uppercase and lowercase letters
-            - Include numbers and special characters
-            - Avoid common words or personal information
-            - Unique to this system
-            """)
+        # Password guidelines with beautiful styling
+        st.markdown("""
+        <div class="security-info">
+            <div class="security-title">Password Security Guidelines</div>
+            <div class="security-item">• Minimum 8 characters length</div>
+            <div class="security-item">• Mix of uppercase and lowercase letters</div>
+            <div class="security-item">• Include numbers and special characters</div>
+            <div class="security-item">• Avoid common words or personal information</div>
+            <div class="security-item">• Unique to this system</div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.markdown('</div>', unsafe_allow_html=True)  # Close form container
     
     def _render_user_statistics(self):
-        """Render user statistics and insights"""
+        """Render user statistics and insights with beautiful cards"""
+        # Add custom CSS for statistics cards
+        st.markdown("""
+        <style>
+        .stats-container {
+            display: flex;
+            gap: 16px;
+            margin: 20px 0;
+            flex-wrap: wrap;
+        }
+        
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 16px;
+            padding: 24px;
+            flex: 1;
+            min-width: 200px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+        }
+        
+        .stat-number {
+            font-size: 2.2rem;
+            font-weight: bold;
+            color: white;
+            margin-bottom: 8px;
+        }
+        
+        .stat-label {
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 1rem;
+            font-weight: 500;
+        }
+        
+        .activity-card {
+            background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+            border-radius: 16px;
+            padding: 24px;
+            margin: 20px 0;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .activity-header {
+            color: white;
+            font-size: 1.3rem;
+            font-weight: 600;
+            margin-bottom: 16px;
+            text-align: center;
+        }
+        
+        .activity-item {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 12px;
+            margin: 8px 0;
+            color: white;
+            border-left: 4px solid rgba(255, 255, 255, 0.3);
+        }
+        
+        .success-item {
+            border-left-color: #28a745;
+        }
+        
+        .failed-item {
+            border-left-color: #dc3545;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        
         st.subheader("User Statistics")
         
         users = self.db_manager.get_users()
@@ -1439,29 +2221,40 @@ class LawFirmAIApp:
             st.info("No user data available.")
             return
         
-        # Basic stats
+        # Basic stats calculation
         total_users = len(users)
         admin_users = sum(1 for user in users if user['role'] == 'admin')
         regular_users = total_users - admin_users
         locked_accounts = sum(1 for user in users if user.get('failed_login_attempts', 0) >= 5)
         
-        # Display metrics
-        col1, col2, col3, col4 = st.columns(4)
+        # Beautiful statistics cards
+        st.markdown("""
+        <div class="stats-container">
+            <div class="stat-card">
+                <div class="stat-number">{}</div>
+                <div class="stat-label">Total Users</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">{}</div>
+                <div class="stat-label">Admin Users</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">{}</div>
+                <div class="stat-label">Regular Users</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">{}</div>
+                <div class="stat-label">Locked Accounts</div>
+            </div>
+        </div>
+        """.format(total_users, admin_users, regular_users, locked_accounts), unsafe_allow_html=True)
         
-        with col1:
-            st.metric("Total Users", total_users)
+        # Recent activity with beautiful styling
+        st.markdown("""
+        <div class="activity-card">
+            <div class="activity-header">Recent User Activity</div>
+        """, unsafe_allow_html=True)
         
-        with col2:
-            st.metric("Admin Users", admin_users)
-        
-        with col3:
-            st.metric("Regular Users", regular_users)
-        
-        with col4:
-            st.metric("Locked Accounts", locked_accounts)
-        
-        # Recent activity
-        st.markdown("### Recent User Activity")
         recent_logs, _ = self.db_manager.get_audit_logs_filtered(
             page=1, 
             page_size=10,
@@ -1471,10 +2264,22 @@ class LawFirmAIApp:
         if recent_logs:
             for log in recent_logs[:5]:  # Show last 5 login events
                 timestamp = log['timestamp'][:19] if log['timestamp'] else 'Unknown'
-                status_text = "[Success]" if log['status'] == 'success' else "[Failed]"
-                st.text(f"{status_text} {log['username']} - {timestamp}")
+                status_class = "success-item" if log['status'] == 'success' else "failed-item"
+                status_text = "[SUCCESS]" if log['status'] == 'success' else "[FAILED]"
+                
+                st.markdown(f"""
+                <div class="activity-item {status_class}">
+                    {status_text} <strong>{log['username']}</strong> - {timestamp}
+                </div>
+                """, unsafe_allow_html=True)
         else:
-            st.info("No recent login activity.")
+            st.markdown("""
+            <div class="activity-item">
+                No recent login activity
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.markdown('</div>', unsafe_allow_html=True)  # Close activity card
     
     def run(self):
         """Main application loop"""

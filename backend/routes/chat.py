@@ -87,11 +87,12 @@ async def chat_completion(request: ChatRequest, http_request: Request):
     prompt_hash = hash_content(request.message) if request.message else ""
     
     # Log chat initiation
+    selected_docs_info = f", selected_docs: {len(request.selected_document_ids)} documents" if request.selected_document_ids else ", selected_docs: all documents"
     log_chat_audit(
         action_type="CHAT_INITIATED",
         status="initiated",
         details=f"Chat request initiated. Message length: {len(request.message)} chars, "
-               f"RAG enabled: {request.use_rag}, max_tokens: {request.max_tokens}, "
+               f"RAG enabled: {request.use_rag}{selected_docs_info}, max_tokens: {request.max_tokens}, "
                f"temperature: {request.temperature}",
         ip_address=ip_address,
         user_agent=user_agent,
@@ -123,7 +124,8 @@ async def chat_completion(request: ChatRequest, http_request: Request):
             
             context_results = rag_service.search_documents(
                 query=request.message,
-                n_results=5
+                n_results=5,
+                selected_document_ids=request.selected_document_ids
             )
             
             # Filter by similarity threshold

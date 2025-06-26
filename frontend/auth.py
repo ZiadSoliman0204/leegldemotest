@@ -415,39 +415,99 @@ class AuthManager:
     
     def show_user_menu(self):
         """
-        Display user menu with profile and security options
+        Display modern user menu with profile and security options
         """
         current_user = self.get_current_user()
         if not current_user:
             return
         
         with st.sidebar:
-            st.markdown("---")
+            # Modern user profile card
+            st.markdown("""
+            <style>
+            .user-profile-card {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                border-radius: 12px;
+                padding: 20px;
+                margin: 16px 0;
+                color: white;
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+                backdrop-filter: blur(10px);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+            }
+            .user-name {
+                font-size: 1.2rem;
+                font-weight: 600;
+                margin-bottom: 8px;
+                text-align: center;
+            }
+            .user-role {
+                background: rgba(255, 255, 255, 0.25);
+                border-radius: 20px;
+                padding: 6px 16px;
+                font-size: 0.85rem;
+                display: inline-block;
+                margin-bottom: 12px;
+                font-weight: 500;
+                text-align: center;
+                width: 100%;
+                box-sizing: border-box;
+            }
+            .admin-role {
+                background: rgba(255, 215, 0, 0.4);
+                color: #FFD700;
+                font-weight: 600;
+            }
+            .session-info {
+                font-size: 0.85rem;
+                opacity: 0.9;
+                text-align: center;
+                padding: 8px 0;
+                border-top: 1px solid rgba(255, 255, 255, 0.2);
+                margin-top: 8px;
+            }
+            .profile-divider {
+                margin: 12px 0;
+                border: none;
+                border-top: 1px solid rgba(255, 255, 255, 0.3);
+            }
+            </style>
+            """, unsafe_allow_html=True)
             
-            # User info with role badge
-            role_badge = "[Admin]" if current_user['role'] == 'admin' else "[User]"
-            st.markdown(f"**Welcome, {current_user['username']}**")
-            st.markdown(f"**Role:** {role_badge}")
-            
-            # Show session info
+            # Calculate session info
             login_time = st.session_state.get('login_time', datetime.now())
             if isinstance(login_time, str):
                 login_time = datetime.fromisoformat(login_time)
             session_duration = datetime.now() - login_time
             hours, remainder = divmod(session_duration.seconds, 3600)
             minutes, _ = divmod(remainder, 60)
-            st.markdown(f"**Session:** {hours}h {minutes}m")
             
-            # User actions
+            # Role styling
+            role_class = "admin-role" if current_user['role'] == 'admin' else ""
+            role_display = "Administrator" if current_user['role'] == 'admin' else "User"
+            
+            # Modern user card
+            st.markdown(f"""
+            <div class="user-profile-card">
+                <div class="user-name">Welcome, {current_user['username']}</div>
+                <div class="user-role {role_class}">{role_display}</div>
+                <div class="session-info">Session: {hours}h {minutes}m</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Spacer
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+            # User actions with modern styling
             col1, col2 = st.columns(2)
             
             with col1:
-                if st.button("Change Password", use_container_width=True):
+                if st.button("Change Password", use_container_width=True, help="Update your account password"):
                     st.session_state.show_change_password = True
                     st.rerun()
             
             with col2:
-                if st.button("Logout", use_container_width=True):
+                if st.button("Logout", use_container_width=True, type="secondary", help="Sign out of your session"):
                     self.logout_user()
             
             # Change password form

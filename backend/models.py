@@ -18,6 +18,7 @@ class ChatRequest(BaseModel):
     message: str = Field(..., description="User's question or prompt")
     context: Optional[str] = Field(None, description="Additional context from RAG")
     use_rag: bool = Field(True, description="Whether to use RAG for context")
+    selected_document_ids: Optional[List[str]] = Field(None, description="Document IDs to filter RAG search")
     max_tokens: Optional[int] = Field(2048, description="Maximum tokens in response")
     temperature: Optional[float] = Field(0.7, description="Response creativity (0.0-1.0)")
 

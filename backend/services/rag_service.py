@@ -162,13 +162,14 @@ class LocalRAGService:
             logger.error(f"Error storing chunks in ChromaDB: {error}")
             raise
     
-    def search_documents(self, query: str, n_results: int = 5) -> List[Dict[str, Any]]:
+    def search_documents(self, query: str, n_results: int = 5, selected_document_ids: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         """
         Search for relevant document chunks using local embeddings
         
         Args:
             query: Search query
             n_results: Number of results to return
+            selected_document_ids: Optional list of document IDs to filter by
             
         Returns:
             List of relevant document chunks
@@ -180,11 +181,24 @@ class LocalRAGService:
             # Generate embedding for query using local method
             query_embedding = self.document_processor._generate_local_embedding(query)
             
-            # Search in ChromaDB
-            results = self.collection.query(
-                query_embeddings=[query_embedding],
-                n_results=min(n_results, 10)  # Cap at 10 results
-            )
+            # Prepare where clause for document filtering
+            where_clause = None
+            if selected_document_ids:
+                if len(selected_document_ids) == 1:
+                    where_clause = {"document_id": selected_document_ids[0]}
+                else:
+                    where_clause = {"document_id": {"$in": selected_document_ids}}
+            
+            # Search in ChromaDB with optional filtering
+            search_params = {
+                "query_embeddings": [query_embedding],
+                "n_results": min(n_results, 10)  # Cap at 10 results
+            }
+            
+            if where_clause:
+                search_params["where"] = where_clause
+            
+            results = self.collection.query(**search_params)
             
             # Format results
             formatted_results = []
@@ -199,7 +213,8 @@ class LocalRAGService:
                     }
                     formatted_results.append(result)
             
-            logger.info(f"Found {len(formatted_results)} relevant chunks for query")
+            search_context = f"all documents" if not selected_document_ids else f"selected documents: {', '.join(selected_document_ids)}"
+            logger.info(f"Found {len(formatted_results)} relevant chunks for query in {search_context}")
             return formatted_results
             
         except Exception as error:
