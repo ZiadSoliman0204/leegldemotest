@@ -26,7 +26,6 @@ class AuthManager:
     
     def __init__(self):
         self.db_manager = DatabaseManager()
-        self.session_timeout = timedelta(hours=8)  # 8-hour session timeout
         self.max_failed_attempts = 5  # Lock account after 5 failed attempts
         self._initialize_session_security()
     
@@ -62,17 +61,6 @@ class AuthManager:
             return "unknown"
         except Exception:
             return "unknown"
-    
-    def _check_session_timeout(self) -> bool:
-        """Check if current session has timed out"""
-        if 'last_activity' not in st.session_state:
-            return True
-        
-        last_activity = st.session_state.last_activity
-        if isinstance(last_activity, str):
-            last_activity = datetime.fromisoformat(last_activity)
-        
-        return datetime.now() - last_activity > self.session_timeout
     
     def _update_last_activity(self):
         """Update last activity timestamp"""
@@ -146,7 +134,7 @@ class AuthManager:
                 action_type="SESSION_CREATED",
                 resource="user_session",
                 status="success",
-                details=f"New user session created. Session timeout: {self.session_timeout}",
+                details="New user session created successfully",
                 ip_address=ip_address,
                 user_agent=user_agent,
                 session_id=session_id,
@@ -214,34 +202,12 @@ class AuthManager:
     
     def is_authenticated(self) -> bool:
         """
-        Check if user is authenticated and session is valid
+        Check if user is authenticated
         
         Returns:
-            True if user is authenticated and session is valid
+            True if user is authenticated
         """
         if not st.session_state.get('authenticated', False):
-            return False
-        
-        # Check session timeout
-        if self._check_session_timeout():
-            current_user = self.get_current_user()
-            if current_user:
-                # Log session timeout
-                self.db_manager.log_audit_event(
-                    user_id=current_user['id'],
-                    username=current_user['username'],
-                    action_type="SESSION_TIMEOUT",
-                    resource="user_session",
-                    status="expired",
-                    details=f"User session expired after {self.session_timeout}",
-                    ip_address=self._get_client_ip(),
-                    session_id=st.session_state.get('session_id', 'unknown'),
-                    severity_level="INFO"
-                )
-            
-            # Clear expired session
-            self.logout_user()
-            st.warning("Your session has expired. Please log in again.")
             return False
         
         # Update last activity
@@ -401,7 +367,6 @@ class AuthManager:
             st.markdown("""
             **Security Features:**
             - Secure password authentication with bcrypt hashing
-            - Session timeout after 8 hours of inactivity  
             - Account lockout after 5 failed login attempts
             - Comprehensive audit logging of all activities
             - IP address tracking and session management
@@ -458,14 +423,6 @@ class AuthManager:
                 color: #FFD700;
                 font-weight: 600;
             }
-            .session-info {
-                font-size: 0.85rem;
-                opacity: 0.9;
-                text-align: center;
-                padding: 8px 0;
-                border-top: 1px solid rgba(255, 255, 255, 0.2);
-                margin-top: 8px;
-            }
             .profile-divider {
                 margin: 12px 0;
                 border: none;
@@ -473,14 +430,6 @@ class AuthManager:
             }
             </style>
             """, unsafe_allow_html=True)
-            
-            # Calculate session info
-            login_time = st.session_state.get('login_time', datetime.now())
-            if isinstance(login_time, str):
-                login_time = datetime.fromisoformat(login_time)
-            session_duration = datetime.now() - login_time
-            hours, remainder = divmod(session_duration.seconds, 3600)
-            minutes, _ = divmod(remainder, 60)
             
             # Role styling
             role_class = "admin-role" if current_user['role'] == 'admin' else ""
@@ -491,7 +440,6 @@ class AuthManager:
             <div class="user-profile-card">
                 <div class="user-name">Welcome, {current_user['username']}</div>
                 <div class="user-role {role_class}">{role_display}</div>
-                <div class="session-info">Session: {hours}h {minutes}m</div>
             </div>
             """, unsafe_allow_html=True)
             
@@ -639,6 +587,5 @@ class AuthManager:
             'login_time': login_time.isoformat(),
             'last_activity': st.session_state.get('last_activity', datetime.now()).isoformat(),
             'ip_address': self._get_client_ip(),
-            'user_agent': self._get_user_agent(),
-            'session_duration': str(datetime.now() - login_time).split('.')[0] if current_user else '0:00:00'
+            'user_agent': self._get_user_agent()
         } 

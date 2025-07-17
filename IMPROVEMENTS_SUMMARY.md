@@ -56,7 +56,7 @@
 ### 🛡️ Authentication Security
 - **JWT tokens** stored in memory (session state)
 - **Bcrypt password hashing** with salt
-- **Session timeout** after 24 hours
+- **Persistent sessions** until manual logout
 - **Role-based access control**
 - **Audit logging** for all user actions
 

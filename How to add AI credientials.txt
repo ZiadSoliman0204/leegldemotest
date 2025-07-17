@@ -1,0 +1,68 @@
+I'll help you configure your AI API credentials. Let me check the current configuration setup to show you exactly where to put them.
+Read file: .env
+Read file: backend/config.py
+
+## 🔑 **AI API Credentials Configuration**
+
+Your AI API credentials go in the **`.env`** file in the root directory of your project. The application supports two AI services:
+
+### **📍 Location:** `/lawfirm_remaster/.env`
+
+### **🤖 Current Configuration Options:**
+
+#### **Option 1: Remote LLM (CoreWeave/VLLM) + OpenAI Embeddings**
+```env
+# Remote LLM API Configuration (CoreWeave VLLM)
+LLM_API_URL=https://your-coreweave-endpoint.com/v1/chat/completions
+LLM_API_KEY=your-bearer-token-here
+LLM_MODEL_NAME=llama-3-70b
+
+# OpenAI API for Lightweight Embedding
+OPENAI_API_KEY=your-openai-api-key-here
+EMBEDDING_MODEL=text-embedding-ada-002
+```
+
+#### **Option 2: Full OpenAI Setup**
+```env
+# OpenAI API Configuration
+LLM_API_URL=https://api.openai.com/v1/chat/completions
+LLM_API_KEY=sk-your-openai-api-key-here
+LLM_MODEL_NAME=gpt-4
+
+# OpenAI API for Embeddings
+OPENAI_API_KEY=sk-your-openai-api-key-here
+EMBEDDING_MODEL=text-embedding-ada-002
+```
+
+#### **Option 3: Local Ollama Setup**
+```env
+# Local Ollama Configuration
+LLM_API_URL=http://localhost:11434/v1/chat/completions
+LLM_API_KEY=ollama-local-key
+LLM_MODEL_NAME=llama3:70b
+
+# OpenAI API for Embeddings (still need this)
+OPENAI_API_KEY=sk-your-openai-api-key-here
+EMBEDDING_MODEL=text-embedding-ada-002
+```
+
+### **🔧 How to Configure:**
+
+1. **Edit the `.env` file** in your project root
+2. **Replace the placeholder values** with your actual API credentials:
+   - Replace `your-bearer-token-here` with your actual API key
+   - Replace `your-openai-api-key-here` with your OpenAI API key
+   - Update URLs if using different providers
+
+3. **Required Credentials:**
+   - **LLM_API_KEY**: Your main AI model API key
+   - **OPENAI_API_KEY**: OpenAI key for document embeddings
+
+### **⚠️ Important Notes:**
+
+- **Keep your `.env` file secure** - never commit it to version control
+- **Both API keys are required** for full functionality
+- **The application validates** these credentials on startup
+- **For local development**, you can use Ollama for the main LLM but still need OpenAI for embeddings
+
+The configuration system automatically loads these credentials when you start the backend server with `python start_backend.py`.

@@ -5,10 +5,12 @@ Enhanced with comprehensive audit logging
 """
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Request
+from fastapi.responses import FileResponse
 import time
 import uuid
 import hashlib
 import logging
+import os
 from typing import List
 
 from ..models import (
@@ -600,4 +602,125 @@ async def get_rag_health(request: Request = None):
         raise HTTPException(
             status_code=500,
             detail=f"Failed to check RAG health: {error_msg}"
+        )
+
+@router.get("/download/{document_id}")
+async def download_document(document_id: str, request: Request = None):
+    """
+    Download the original uploaded document
+    Returns the file for download with proper headers
+    Enhanced with comprehensive audit logging
+    """
+    start_time = time.time()
+    request_id = str(uuid.uuid4())
+    
+    # Extract request metadata
+    ip_address = get_client_ip(request) if request else "unknown"
+    user_agent = request.headers.get("User-Agent", "unknown") if request else "unknown"
+    
+    # Log document download initiation
+    log_document_audit(
+        action_type="DOC_DOWNLOAD_INITIATED",
+        status="initiated",
+        details=f"Document download requested for ID: {document_id}",
+        ip_address=ip_address,
+        user_agent=user_agent,
+        resource=f"document:{document_id}",
+        severity_level="INFO",
+        request_id=request_id
+    )
+    
+    try:
+        # Get the stored file path
+        stored_file_path = rag_service.get_document_file_path(document_id)
+        
+        if not stored_file_path:
+            # Log file not found
+            log_document_audit(
+                action_type="DOC_DOWNLOAD_NOT_FOUND",
+                status="failure",
+                details=f"Document file not found for ID: {document_id}",
+                ip_address=ip_address,
+                user_agent=user_agent,
+                resource=f"document:{document_id}",
+                severity_level="WARNING",
+                request_id=request_id
+            )
+            
+            raise HTTPException(
+                status_code=404,
+                detail=f"Document {document_id} not found or file not available"
+            )
+        
+        # Check if file exists
+        if not os.path.exists(stored_file_path):
+            # Log file missing
+            log_document_audit(
+                action_type="DOC_DOWNLOAD_FILE_MISSING",
+                status="error",
+                details=f"Stored file missing: {stored_file_path}",
+                ip_address=ip_address,
+                user_agent=user_agent,
+                resource=f"document:{document_id}",
+                severity_level="ERROR",
+                request_id=request_id
+            )
+            
+            raise HTTPException(
+                status_code=404,
+                detail="Document file is missing from storage"
+            )
+        
+        # Extract original filename from stored path
+        original_filename = os.path.basename(stored_file_path)
+        # Remove document ID prefix if present
+        if "_" in original_filename:
+            original_filename = "_".join(original_filename.split("_")[1:])
+        
+        processing_time = time.time() - start_time
+        
+        # Log successful download
+        log_document_audit(
+            action_type="DOC_DOWNLOAD_SUCCESS",
+            status="success",
+            details=f"Document downloaded successfully. Processing time: {processing_time:.2f}s, "
+                   f"File: {original_filename}, Size: {os.path.getsize(stored_file_path)} bytes",
+            ip_address=ip_address,
+            user_agent=user_agent,
+            resource=f"document:{document_id}",
+            severity_level="INFO",
+            request_id=request_id
+        )
+        
+        logger.info(f"Document {document_id} downloaded successfully: {original_filename}")
+        
+        # Return file for download
+        return FileResponse(
+            path=stored_file_path,
+            filename=original_filename,
+            media_type='application/octet-stream'
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        processing_time = time.time() - start_time
+        error_msg = str(e)
+        
+        # Log download error
+        log_document_audit(
+            action_type="DOC_DOWNLOAD_ERROR",
+            status="error",
+            details=f"Error downloading document {document_id} after {processing_time:.2f}s: {error_msg}",
+            ip_address=ip_address,
+            user_agent=user_agent,
+            resource=f"document:{document_id}",
+            severity_level="ERROR",
+            request_id=request_id
+        )
+        
+        logger.error(f"Error downloading document {document_id}: {error_msg}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to download document: {error_msg}"
         ) 

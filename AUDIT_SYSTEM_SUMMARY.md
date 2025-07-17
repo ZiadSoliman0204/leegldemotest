@@ -47,7 +47,7 @@ Successfully implemented a **production-grade audit logging system** for the Law
 - 🔐 Authentication events (login, logout, failed attempts)
 - 💬 Chat interactions (prompts, responses, API errors)
 - 📄 Document operations (upload, delete, with metadata)
-- 🛡️ Security events (unauthorized access, session timeouts)
+- Security events (unauthorized access, account lockouts)
 
 ### 3. Backend Route Audit Logging
 **Files:** `backend/routes/chat.py`, `backend/routes/documents.py`
@@ -70,7 +70,7 @@ Successfully implemented a **production-grade audit logging system** for the Law
 **File:** `frontend/auth.py`
 
 **Security Enhancements:**
-- **Session management** with timeout (8 hours)
+- **Session management** with persistent sessions
 - **Account lockout** after 5 failed attempts
 - **Comprehensive session tracking**
 - **IP address and user agent logging**
@@ -78,7 +78,7 @@ Successfully implemented a **production-grade audit logging system** for the Law
 - **Session hijacking protection**
 
 **Security Features:**
-- Session timeout detection
+- Session activity tracking
 - Failed login attempt tracking
 - Account lockout mechanisms
 - Comprehensive audit trail
@@ -92,7 +92,7 @@ Successfully implemented a **production-grade audit logging system** for the Law
 - **Content Hashing:** SHA-256 hashing of sensitive prompts/documents
 - **IP Anonymization:** GDPR/CCPA compliant IP address handling
 - **Encryption:** Fernet encryption for sensitive audit data
-- **Session Security:** UUID-based session IDs, timeout management
+- **Session Security:** UUID-based session IDs, activity tracking
 
 ### Access Control
 - **Role-based auditing:** Different logging levels for admin vs user

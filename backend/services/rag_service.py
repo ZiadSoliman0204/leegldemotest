@@ -11,6 +11,8 @@ import os
 import tempfile
 import logging
 from pathlib import Path
+import shutil
+import base64
 
 from .document_processor import LocalDocumentProcessor
 
@@ -27,13 +29,17 @@ class LocalRAGService:
             chroma_db_path: Path to ChromaDB storage
         """
         self.chroma_db_path = chroma_db_path
+        self.documents_storage_path = "data/stored_documents"
         self.document_processor = LocalDocumentProcessor()
         self.collection_name = "law_firm_documents"
+        
+        # Create documents storage directory
+        os.makedirs(self.documents_storage_path, exist_ok=True)
         
         # Initialize ChromaDB
         self._initialize_chroma_client()
         
-        logger.info("LocalRAGService initialized with local embeddings")
+        logger.info("LocalRAGService initialized with local embeddings and file storage")
     
     def _initialize_chroma_client(self):
         """Initialize ChromaDB client and collection"""
@@ -71,6 +77,7 @@ class LocalRAGService:
     def upload_document(self, file_content: bytes, filename: str) -> Dict[str, Any]:
         """
         Process and upload a document to the vector database
+        Also stores the original file for download
         
         Args:
             file_content: Raw file content
@@ -103,8 +110,15 @@ class LocalRAGService:
                     filename=filename
                 )
                 
-                # Store in ChromaDB
-                self._store_document_chunks(processing_result)
+                # Store original file for download
+                stored_file_path = self._store_original_file(
+                    file_content, 
+                    filename, 
+                    processing_result["document_id"]
+                )
+                
+                # Store in ChromaDB with file path metadata
+                self._store_document_chunks(processing_result, stored_file_path)
                 
                 logger.info(f"Successfully uploaded {filename} with {len(processing_result['chunks'])} chunks")
                 
@@ -114,7 +128,8 @@ class LocalRAGService:
                     "pages_processed": processing_result["pages_processed"],
                     "total_chunks": len(processing_result["chunks"]),
                     "file_type": file_extension,
-                    "processing_method": "local"
+                    "processing_method": "local",
+                    "stored_file_path": stored_file_path
                 }
                 
             finally:
@@ -127,8 +142,37 @@ class LocalRAGService:
         except Exception as error:
             logger.error(f"Error uploading document {filename}: {error}")
             raise ValueError(f"Failed to upload document: {str(error)}")
-    
-    def _store_document_chunks(self, processing_result: Dict[str, Any]):
+
+    def _store_original_file(self, file_content: bytes, filename: str, document_id: str) -> str:
+        """
+        Store the original file for later download
+        
+        Args:
+            file_content: Raw file content
+            filename: Original filename
+            document_id: Document ID for unique naming
+            
+        Returns:
+            Path to stored file
+        """
+        try:
+            # Create safe filename with document ID
+            file_extension = Path(filename).suffix.lower()
+            safe_filename = f"{document_id}_{filename.replace(' ', '_')}"
+            stored_file_path = os.path.join(self.documents_storage_path, safe_filename)
+            
+            # Store the file
+            with open(stored_file_path, 'wb') as f:
+                f.write(file_content)
+            
+            logger.info(f"Stored original file: {stored_file_path}")
+            return stored_file_path
+            
+        except Exception as error:
+            logger.error(f"Error storing original file {filename}: {error}")
+            raise ValueError(f"Failed to store original file: {str(error)}")
+
+    def _store_document_chunks(self, processing_result: Dict[str, Any], stored_file_path: str = None):
         """Store processed document chunks in ChromaDB"""
         try:
             chunks = processing_result["chunks"]
@@ -143,10 +187,15 @@ class LocalRAGService:
                 # Create unique ID for each chunk
                 chunk_id = f"{chunk['metadata']['document_id']}_chunk_{chunk['metadata']['chunk_index']}"
                 
+                # Add stored file path to metadata
+                chunk_metadata = chunk["metadata"].copy()
+                if stored_file_path:
+                    chunk_metadata["stored_file_path"] = stored_file_path
+                
                 ids.append(chunk_id)
                 documents.append(chunk["text"])
                 embeddings.append(chunk["embedding"])
-                metadatas.append(chunk["metadata"])
+                metadatas.append(chunk_metadata)
             
             # Add to ChromaDB collection
             self.collection.add(
@@ -221,30 +270,73 @@ class LocalRAGService:
             logger.error(f"Error searching documents: {error}")
             return []
     
-    def delete_document(self, document_id: str) -> bool:
+    def get_document_file_path(self, document_id: str) -> Optional[str]:
         """
-        Delete a document and all its chunks from the vector database
+        Get the stored file path for a document
         
         Args:
-            document_id: ID of document to delete
+            document_id: Document ID
+            
+        Returns:
+            File path if found, None otherwise
+        """
+        try:
+            # Query ChromaDB for document metadata
+            results = self.collection.get(
+                where={"document_id": document_id},
+                limit=1
+            )
+            
+            if results['metadatas'] and len(results['metadatas']) > 0:
+                metadata = results['metadatas'][0]
+                stored_file_path = metadata.get('stored_file_path')
+                
+                # Check if file exists
+                if stored_file_path and os.path.exists(stored_file_path):
+                    return stored_file_path
+                else:
+                    logger.warning(f"Stored file not found for document {document_id}: {stored_file_path}")
+                    return None
+            else:
+                logger.warning(f"No metadata found for document {document_id}")
+                return None
+                
+        except Exception as error:
+            logger.error(f"Error getting file path for document {document_id}: {error}")
+            return None
+
+    def delete_document(self, document_id: str) -> bool:
+        """
+        Delete a document and its associated file from the system
+        
+        Args:
+            document_id: Document ID to delete
             
         Returns:
             True if successful, False otherwise
         """
         try:
-            # Get all chunks for this document
-            results = self.collection.get(
-                where={"document_id": document_id}
-            )
+            # Get file path before deleting from database
+            stored_file_path = self.get_document_file_path(document_id)
             
-            if not results['ids']:
-                logger.warning(f"No chunks found for document ID: {document_id}")
-                return False
+            # Delete from ChromaDB
+            try:
+                self.collection.delete(
+                    where={"document_id": document_id}
+                )
+                logger.info(f"Deleted document {document_id} from ChromaDB")
+            except Exception as db_error:
+                logger.error(f"Error deleting from ChromaDB: {db_error}")
+                # Continue to try file deletion even if DB deletion fails
             
-            # Delete all chunks
-            self.collection.delete(ids=results['ids'])
+            # Delete stored file
+            if stored_file_path and os.path.exists(stored_file_path):
+                try:
+                    os.unlink(stored_file_path)
+                    logger.info(f"Deleted stored file: {stored_file_path}")
+                except Exception as file_error:
+                    logger.error(f"Error deleting stored file: {file_error}")
             
-            logger.info(f"Deleted document {document_id} and {len(results['ids'])} chunks")
             return True
             
         except Exception as error:

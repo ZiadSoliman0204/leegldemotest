@@ -91,7 +91,9 @@ class LawFirmAIApp:
             'chat_sessions_loaded': False,
             'chat_history_needs_refresh': False,
             # Document selection for context
-            'selected_document_ids': []
+            'selected_document_ids': [],
+            # Document deletion confirmation
+            'confirm_delete_document': None
         }
         
         for key, value in default_values.items():
@@ -1249,7 +1251,123 @@ class LawFirmAIApp:
                 severity_level="ERROR"
             )
     
-    def delete_document(self, document_id: str, filename: str):
+    def _show_delete_confirmation(self):
+        """Show confirmation dialog for document deletion"""
+        doc_info = st.session_state.confirm_delete_document
+        if not doc_info:
+            st.rerun()
+            return
+        
+        filename = doc_info['filename']
+        document_id = doc_info['document_id']
+        
+        # Create modal-like overlay using CSS and centered container
+        st.markdown("""
+        <style>
+        .delete-confirmation-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            z-index: 9999;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .delete-confirmation-modal {
+            background: white;
+            border-radius: 12px;
+            padding: 40px;
+            max-width: 500px;
+            width: 90%;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+            text-align: center;
+        }
+        .delete-title {
+            color: #d32f2f;
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 20px;
+        }
+        .delete-message {
+            font-size: 16px;
+            margin-bottom: 30px;
+            line-height: 1.5;
+        }
+        .delete-warning {
+            color: #ff5722;
+            font-size: 14px;
+            margin-bottom: 30px;
+            font-style: italic;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        # Add some spacing and center the dialog
+        st.markdown("<br><br>", unsafe_allow_html=True)
+        
+        # Create centered confirmation dialog with prominent styling
+        col1, col2, col3 = st.columns([1, 3, 1])
+        
+        with col2:
+            st.markdown(f"""
+            <div style="
+                background: white;
+                border: 3px solid #d32f2f;
+                border-radius: 16px;
+                padding: 40px;
+                text-align: center;
+                box-shadow: 0 12px 32px rgba(211, 47, 47, 0.25);
+                margin: 40px 0;
+            ">
+                <div style="color: #d32f2f; font-size: 28px; font-weight: bold; margin-bottom: 24px;">
+                    🗑️ Delete Document
+                </div>
+                <div style="font-size: 18px; margin-bottom: 24px; color: black; line-height: 1.5;">
+                    Are you sure you want to permanently delete:
+                </div>
+                <div style="
+                    background: white;
+                    border: 2px solid #d32f2f;
+                    border-radius: 8px;
+                    padding: 16px;
+                    margin: 20px 0;
+                    font-size: 16px;
+                    font-weight: bold;
+                    color: black;
+                ">
+                    {filename}
+                </div>
+                <div style="color: black; font-size: 14px; margin-top: 20px; font-style: italic; line-height: 1.4;">
+                    ⚠️ This action cannot be undone<br>
+                    The document and all its indexed content will be permanently removed from the system
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # Create prominent confirmation buttons
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        button_col1, button_col2, button_col3, button_col4, button_col5 = st.columns([1, 2, 1, 2, 1])
+        
+        with button_col2:
+            if st.button("✖️ Cancel", use_container_width=True, key="cancel_delete", help="Cancel deletion and return to document list"):
+                st.session_state.confirm_delete_document = None
+                st.rerun()
+        
+        with button_col4:
+            if st.button("🗑️ Delete Document", type="primary", use_container_width=True, key="confirm_delete", help="Permanently delete this document"):
+                # Clear the confirmation state
+                st.session_state.confirm_delete_document = None
+                # Perform the actual deletion
+                self._perform_document_deletion(document_id, filename)
+                st.rerun()
+        
+        st.markdown("<br><br>", unsafe_allow_html=True)
+
+    def _perform_document_deletion(self, document_id: str, filename: str):
         """Delete document with enhanced audit logging"""
         current_user = self.auth_manager.get_current_user()
         ip_address = self._get_client_ip()
@@ -1326,6 +1444,109 @@ class LawFirmAIApp:
                 session_id=self.session_id,
                 severity_level="ERROR"
             )
+
+    def delete_document(self, document_id: str, filename: str):
+        """Initiate document deletion with confirmation dialog"""
+        # Store the document info for confirmation dialog
+        st.session_state.confirm_delete_document = {
+            'document_id': document_id,
+            'filename': filename
+        }
+        st.rerun()
+    
+    def download_document(self, document_id: str, filename: str):
+        """Prepare document for download with enhanced audit logging"""
+        current_user = self.auth_manager.get_current_user()
+        ip_address = self._get_client_ip()
+        user_agent = self._get_user_agent()
+        
+        # Log document download initiation
+        self.db_manager.log_audit_event(
+            user_id=current_user['id'] if current_user else None,
+            username=current_user['username'] if current_user else 'anonymous',
+            action_type="DOC_DOWNLOAD_INITIATED",
+            resource=f"document:{filename}",
+            status="initiated",
+            details=f"Document download initiated for ID: {document_id}",
+            ip_address=ip_address,
+            user_agent=user_agent,
+            session_id=self.session_id,
+            severity_level="INFO"
+        )
+        
+        try:
+            with st.spinner(f"Preparing {filename} for download..."):
+                response = requests.get(
+                    f"{API_BASE_URL}/api/v1/documents/download/{document_id}",
+                    timeout=30
+                )
+            
+            if response.status_code == 200:
+                # Log successful download preparation
+                self.db_manager.log_audit_event(
+                    user_id=current_user['id'] if current_user else None,
+                    username=current_user['username'] if current_user else 'anonymous',
+                    action_type="DOC_DOWNLOAD_SUCCESS",
+                    resource=f"document:{filename}",
+                    status="success",
+                    details=f"Document download prepared successfully. Size: {len(response.content)} bytes",
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                    session_id=self.session_id,
+                    severity_level="INFO"
+                )
+                
+                # Log user action for legacy compatibility
+                self.auth_manager.log_user_action(
+                    "DOCUMENT_DOWNLOADED", 
+                    f"Downloaded document: {filename}"
+                )
+                
+                # Store download data in session state
+                st.session_state.pending_download = {
+                    'filename': filename,
+                    'content': response.content,
+                    'document_id': document_id
+                }
+                
+                st.success(f"Document '{filename}' is ready for download!")
+                st.rerun()
+                
+            else:
+                error_msg = f"Download failed: {response.text}"
+                st.error(error_msg)
+                
+                # Log download failure
+                self.db_manager.log_audit_event(
+                    user_id=current_user['id'] if current_user else None,
+                    username=current_user['username'] if current_user else 'anonymous',
+                    action_type="DOC_DOWNLOAD_FAILED",
+                    resource=f"document:{filename}",
+                    status="failure",
+                    details=f"Download failed: {response.status_code} - {response.text}",
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                    session_id=self.session_id,
+                    severity_level="WARNING"
+                )
+                
+        except Exception as error:
+            error_msg = f"Error downloading document: {str(error)}"
+            st.error(error_msg)
+            
+            # Log download error
+            self.db_manager.log_audit_event(
+                user_id=current_user['id'] if current_user else None,
+                username=current_user['username'] if current_user else 'anonymous',
+                action_type="DOC_DOWNLOAD_ERROR",
+                resource=f"document:{filename}",
+                status="error",
+                details=f"Download error: {str(error)}",
+                ip_address=ip_address,
+                user_agent=user_agent,
+                session_id=self.session_id,
+                severity_level="ERROR"
+            )
     
     def load_document_list(self):
         """Load the list of uploaded documents"""
@@ -1342,6 +1563,11 @@ class LawFirmAIApp:
     
     def render_document_management(self):
         """Render document management interface"""
+        # Show confirmation dialog if document is selected for deletion
+        if st.session_state.confirm_delete_document:
+            self._show_delete_confirmation()
+            return  # Don't render the rest of the interface when showing confirmation
+        
         # Header with refresh button
         col1, col2 = st.columns([4, 1])
         with col1:
@@ -1357,9 +1583,9 @@ class LawFirmAIApp:
         # Upload section
         st.subheader("Upload New Document")
         uploaded_file = st.file_uploader(
-            "Choose a PDF file",
-            type=['pdf'],
-            help="Upload legal documents for AI analysis"
+            "Choose a document file",
+            type=['pdf', 'txt', 'docx'],
+            help="Upload legal documents for AI analysis (PDF, TXT, or DOCX)"
         )
         
         if uploaded_file is not None:
@@ -1370,6 +1596,28 @@ class LawFirmAIApp:
                 if st.button("Upload", use_container_width=True):
                     self.upload_document(uploaded_file)
         
+        # Show pending download if available
+        if hasattr(st.session_state, 'pending_download') and st.session_state.pending_download:
+            download_data = st.session_state.pending_download
+            col1, col2 = st.columns([3, 1])
+            
+            with col1:
+                st.info(f"Document '{download_data['filename']}' is ready for download.")
+            
+            with col2:
+                # Create the actual download button
+                if st.download_button(
+                    label="Download Now",
+                    data=download_data['content'],
+                    file_name=download_data['filename'],
+                    mime="application/octet-stream",
+                    help=f"Download {download_data['filename']}",
+                    use_container_width=True
+                ):
+                    # Clear pending download after successful download
+                    st.session_state.pending_download = None
+                    st.rerun()
+        
         # Document list section
         st.subheader("Uploaded Documents")
         
@@ -1378,7 +1626,7 @@ class LawFirmAIApp:
         
         if st.session_state.documents_uploaded:
             for doc in st.session_state.documents_uploaded:
-                col1, col2, col3 = st.columns([3, 2, 1])
+                col1, col2, col3, col4 = st.columns([3, 2, 1, 1])
                 
                 with col1:
                     st.write(f"**{doc.get('filename', 'Unknown')}**")
@@ -1387,7 +1635,14 @@ class LawFirmAIApp:
                     st.write(f"Chunks: {doc.get('chunk_count', 0)}")
                 
                 with col3:
-                    if st.button("Delete", key=f"delete_{doc.get('document_id')}"):
+                    if st.button("Download", key=f"download_{doc.get('document_id')}", use_container_width=True):
+                        self.download_document(
+                            doc.get('document_id'), 
+                            doc.get('filename', 'Unknown')
+                        )
+                
+                with col4:
+                    if st.button("Delete", key=f"delete_{doc.get('document_id')}", use_container_width=True):
                         self.delete_document(
                             doc.get('document_id'), 
                             doc.get('filename', 'Unknown')
