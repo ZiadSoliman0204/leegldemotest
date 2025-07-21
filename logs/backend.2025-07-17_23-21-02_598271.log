@@ -1,0 +1,32 @@
+2025-07-17 23:21:02 | INFO     | __main__:main:75 - Starting Law Firm AI Assistant Backend
+2025-07-17 23:21:02 | INFO     | __main__:validate_environment:57 - Environment validation passed
+2025-07-17 23:21:02 | INFO     | __main__:create_directories:69 - Ensured directory exists: logs
+2025-07-17 23:21:02 | INFO     | __main__:create_directories:69 - Ensured directory exists: data
+2025-07-17 23:21:02 | INFO     | __main__:create_directories:69 - Ensured directory exists: ./data/chroma_db
+2025-07-17 23:21:02 | INFO     | __main__:main:88 - Server configuration: 0.0.0.0:8000 (debug=False)
+2025-07-17 23:21:09 | ERROR    | __main__:main:103 - Server startup failed: cannot import name 'BaseResponse' from 'backend.models' (E:\Projects\lawfirm_remaster\backend\models.py)
+2025-07-17 23:27:45 | INFO     | __main__:main:75 - Starting Law Firm AI Assistant Backend
+2025-07-17 23:27:45 | INFO     | __main__:validate_environment:57 - Environment validation passed
+2025-07-17 23:27:45 | INFO     | __main__:create_directories:69 - Ensured directory exists: logs
+2025-07-17 23:27:45 | INFO     | __main__:create_directories:69 - Ensured directory exists: data
+2025-07-17 23:27:45 | INFO     | __main__:create_directories:69 - Ensured directory exists: ./data/chroma_db
+2025-07-17 23:27:45 | INFO     | __main__:main:88 - Server configuration: 0.0.0.0:8000 (debug=False)
+2025-07-17 23:27:48 | ERROR    | __main__:main:103 - Server startup failed: cannot import name 'BaseResponse' from 'backend.models' (E:\Projects\lawfirm_remaster\backend\models.py)
+2025-07-17 23:29:13 | INFO     | __main__:main:75 - Starting Law Firm AI Assistant Backend
+2025-07-17 23:29:13 | INFO     | __main__:validate_environment:57 - Environment validation passed
+2025-07-17 23:29:13 | INFO     | __main__:create_directories:69 - Ensured directory exists: logs
+2025-07-17 23:29:13 | INFO     | __main__:create_directories:69 - Ensured directory exists: data
+2025-07-17 23:29:13 | INFO     | __main__:create_directories:69 - Ensured directory exists: ./data/chroma_db
+2025-07-17 23:29:13 | INFO     | __main__:main:88 - Server configuration: 0.0.0.0:8000 (debug=False)
+2025-07-17 23:29:17 | INFO     | backend.main:startup_event:44 - Starting Law Firm AI Assistant API
+2025-07-17 23:29:17 | INFO     | backend.main:startup_event:45 - LLM API URL: https://your-coreweave-endpoint.com/v1/chat/completions
+2025-07-17 23:29:17 | INFO     | backend.main:startup_event:46 - ChromaDB Path: ./data/chroma_db
+2025-07-18 00:20:13 | INFO     | __main__:main:75 - Starting Law Firm AI Assistant Backend
+2025-07-18 00:20:13 | INFO     | __main__:validate_environment:57 - Environment validation passed
+2025-07-18 00:20:13 | INFO     | __main__:create_directories:69 - Ensured directory exists: logs
+2025-07-18 00:20:13 | INFO     | __main__:create_directories:69 - Ensured directory exists: data
+2025-07-18 00:20:13 | INFO     | __main__:create_directories:69 - Ensured directory exists: ./data/chroma_db
+2025-07-18 00:20:13 | INFO     | __main__:main:88 - Server configuration: 0.0.0.0:8000 (debug=False)
+2025-07-18 00:20:18 | INFO     | backend.main:startup_event:43 - Starting Law Firm AI Assistant API
+2025-07-18 00:20:18 | INFO     | backend.main:startup_event:44 - LLM API URL: https://your-coreweave-endpoint.com/v1/chat/completions
+2025-07-18 00:20:18 | INFO     | backend.main:startup_event:45 - ChromaDB Path: ./data/chroma_db

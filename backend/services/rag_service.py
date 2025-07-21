@@ -254,11 +254,17 @@ class LocalRAGService:
             
             if results['documents'] and results['documents'][0]:
                 for i in range(len(results['documents'][0])):
+                    # Fix similarity calculation for cosine distance
+                    distance = results['distances'][0][i] if results['distances'] else 0.0
+                    # For cosine distance, similarity = 1 - distance, but ensure it's positive
+                    # ChromaDB returns cosine distance where 0 = identical, 2 = opposite
+                    similarity = max(0.0, 1.0 - (distance / 2.0))  # Normalize cosine distance properly
+                    
                     result = {
                         'content': results['documents'][0][i],
                         'metadata': results['metadatas'][0][i] if results['metadatas'] else {},
-                        'distance': results['distances'][0][i] if results['distances'] else 0.0,
-                        'similarity': 1.0 - results['distances'][0][i] if results['distances'] else 1.0
+                        'distance': distance,
+                        'similarity': similarity
                     }
                     formatted_results.append(result)
             

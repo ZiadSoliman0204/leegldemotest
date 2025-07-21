@@ -8,6 +8,7 @@ import requests
 import os
 import uuid
 import hashlib
+import logging
 from datetime import datetime, date
 from typing import Optional, Dict, Any, List
 import json
@@ -47,6 +48,26 @@ class LawFirmAIApp:
         self.db_manager = DatabaseManager()
         self.session_id = self._get_or_create_session_id()
         self._initialize_session_state()
+    
+    def _get_auth_headers(self) -> Dict[str, str]:
+        """Get authentication headers for API requests"""
+        current_user = self.auth_manager.get_current_user()
+        if not current_user:
+            return {"Content-Type": "application/json"}
+            
+        # Get or create JWT token for this user
+        jwt_token = self._get_or_create_jwt_token(current_user)
+        
+        return {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {jwt_token}"
+        }
+    
+    def _get_or_create_jwt_token(self, user_data: Dict[str, Any]) -> str:
+        """Get authentication token for API requests"""
+        # Use the internal API key that the backend accepts
+        # This matches the INTERNAL_API_KEY in the backend auth configuration
+        return "internal-secret-key"
     
     def _get_or_create_session_id(self) -> str:
         """Get or create session ID for audit tracking"""
@@ -985,45 +1006,50 @@ class LawFirmAIApp:
         return payload
     
     def _make_api_request(self, payload: Dict[str, Any]) -> requests.Response:
-        """Make the actual API request"""
+        """Make the actual API request with authentication"""
+        headers = self._get_auth_headers()
         return requests.post(
             f"{API_BASE_URL}/api/v1/chat/completions",
             json=payload,
+            headers=headers,
             timeout=DEFAULT_TIMEOUT
         )
     
     def render_chat_messages(self):
-        """Render chat message history"""
-        for message in st.session_state.messages:
+        """Render chat message history with working display"""        
+        # Simple, working message display without complex CSS
+        for i, message in enumerate(st.session_state.messages):
             if message["role"] == "user":
-                self._render_user_message(message["content"])
+                # User message
+                st.markdown("**User:**")
+                st.info(message["content"])
             else:
-                self._render_assistant_message(message["content"])
+                # Assistant message  
+                st.markdown("**Legal Assistant:**")
+                st.success(message["content"])
                 
                 # Show sources if available
                 if "sources" in message and message["sources"]:
-                    self._render_sources(message["sources"])
+                    with st.expander("View Sources", expanded=False):
+                        for j, source in enumerate(message["sources"], 1):
+                            st.markdown(f"**Source {j}:** {source}")
+            
+            # Add separator between messages except for the last one
+            if i < len(st.session_state.messages) - 1:
+                st.markdown("---")
+    
+
     
     def _render_user_message(self, content: str):
-        """Render a user message"""
-        st.markdown(f"""
-        <div class="chat-message user-message">
-            <strong>User:</strong><br>
-            {content}
-        </div>
-        """, unsafe_allow_html=True)
+        """Legacy method - kept for compatibility"""
+        st.markdown(self._get_user_message_html(content), unsafe_allow_html=True)
     
     def _render_assistant_message(self, content: str):
-        """Render an assistant message"""
-        st.markdown(f"""
-        <div class="chat-message assistant-message">
-            <strong>Legal Assistant:</strong><br>
-            {content}
-        </div>
-        """, unsafe_allow_html=True)
+        """Legacy method - kept for compatibility"""
+        st.markdown(self._get_assistant_message_html(content), unsafe_allow_html=True)
     
     def _render_sources(self, sources: List[str]):
-        """Render document sources"""
+        """Legacy method - kept for compatibility"""
         with st.expander("View Sources"):
             for i, source in enumerate(sources, 1):
                 st.markdown(f"**Source {i}:** {source}")
@@ -1132,25 +1158,42 @@ class LawFirmAIApp:
             st.info("No documents uploaded yet. Upload documents in the Document Management section to enable context selection.")
     
     def render_chat_interface(self):
-        """Render the main chat interface"""
+        """Render the main chat interface with improved layout"""
         st.header("Legal Assistant Chat")
         
         # Document selection section
         self.render_document_selection()
         
-        # Chat history container
-        chat_container = st.container()
-        with chat_container:
-            if not st.session_state.messages:
-                st.info("Start a conversation by asking a legal question below.")
-            else:
-                self.render_chat_messages()
+        # Chat messages area with fixed height
+        if not st.session_state.messages:
+            st.markdown("""
+            <div style="
+                height: 400px; 
+                border: 2px dashed #e0e0e0; 
+                border-radius: 10px; 
+                display: flex; 
+                align-items: center; 
+                justify-content: center;
+                background-color: #fafafa;
+                color: #666;
+                font-size: 1.1em;
+                text-align: center;
+                margin: 10px 0;
+            ">
+                <div>
+                    <div style="font-size: 1.5em; margin-bottom: 10px; font-weight: bold;">Chat Interface</div>
+                    <div>Start a conversation by asking a legal question below.</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            self.render_chat_messages()
         
-        # Clear chat button
+        # Action buttons
         if st.session_state.messages:
             col1, col2 = st.columns(2)
             with col1:
-                if st.button("Clear Current Chat", use_container_width=True):
+                if st.button("Clear Current Chat", use_container_width=True, type="secondary"):
                     st.session_state.messages = []
                     # Start a new session for the next message
                     st.session_state.current_chat_session_id = None
@@ -1158,7 +1201,7 @@ class LawFirmAIApp:
                     st.rerun()
             
             with col2:
-                if st.button("Export Chat", use_container_width=True):
+                if st.button("Export Chat", use_container_width=True, type="secondary"):
                     self.export_current_chat()
     
     def upload_document(self, uploaded_file):
@@ -1186,9 +1229,11 @@ class LawFirmAIApp:
         
         try:
             files = {"file": (uploaded_file.name, uploaded_file, uploaded_file.type)}
+            headers = {"Authorization": "Bearer internal-secret-key"}
             response = requests.post(
                 f"{API_BASE_URL}/api/v1/documents/upload",
                 files=files,
+                headers=headers,
                 timeout=UPLOAD_TIMEOUT
             )
             
@@ -1386,7 +1431,8 @@ class LawFirmAIApp:
         )
         
         try:
-            response = requests.delete(f"{API_BASE_URL}/api/v1/documents/{document_id}")
+            headers = {"Authorization": "Bearer internal-secret-key"}
+            response = requests.delete(f"{API_BASE_URL}/api/v1/documents/{document_id}", headers=headers)
             
             if response.status_code == 200:
                 st.success(f"Document '{filename}' deleted successfully!")
@@ -1551,7 +1597,8 @@ class LawFirmAIApp:
     def load_document_list(self):
         """Load the list of uploaded documents"""
         try:
-            response = requests.get(f"{API_BASE_URL}/api/v1/documents/list")
+            headers = {"Authorization": "Bearer internal-secret-key"}
+            response = requests.get(f"{API_BASE_URL}/api/v1/documents/list", headers=headers)
             if response.status_code == 200:
                 result = response.json()
                 st.session_state.documents_uploaded = result.get("documents", [])

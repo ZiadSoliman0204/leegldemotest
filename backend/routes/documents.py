@@ -4,7 +4,7 @@ Handles document upload, processing, and indexing for RAG with local embeddings
 Enhanced with comprehensive audit logging
 """
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, Request
+from fastapi import APIRouter, UploadFile, File, HTTPException, Request, Depends
 from fastapi.responses import FileResponse
 import time
 import uuid
@@ -20,6 +20,7 @@ from ..models import (
     ErrorResponse
 )
 from ..services.rag_service import LocalRAGService
+from ..auth import get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -71,11 +72,16 @@ def log_document_audit(
         logger.error(f"Failed to log audit event: {e}")
 
 @router.post("/upload", response_model=DocumentUploadResponse)
-async def upload_document(file: UploadFile = File(...), request: Request = None):
+async def upload_document(
+    file: UploadFile = File(...), 
+    request: Request = None,
+    current_user: dict = Depends(get_current_user)
+):
     """
     Upload and process a legal document for RAG indexing
     Supports PDF, TXT, and DOCX files with local processing
     Enhanced with comprehensive audit logging
+    REQUIRES AUTHENTICATION: JWT token or API key
     """
     start_time = time.time()
     request_id = str(uuid.uuid4())
@@ -88,8 +94,9 @@ async def upload_document(file: UploadFile = File(...), request: Request = None)
     log_document_audit(
         action_type="DOC_UPLOAD_INITIATED",
         status="initiated",
-        details=f"Document upload started. Filename: {file.filename}, "
-               f"Content-Type: {file.content_type}, Size: {file.size if hasattr(file, 'size') else 'unknown'} bytes",
+        details=f"Document upload started by {current_user['username']} ({current_user['auth_type']}). "
+               f"Filename: {file.filename}, Content-Type: {file.content_type}, "
+               f"Size: {file.size if hasattr(file, 'size') else 'unknown'} bytes",
         ip_address=ip_address,
         user_agent=user_agent,
         resource=f"document:{file.filename}",
@@ -220,11 +227,16 @@ async def upload_document(file: UploadFile = File(...), request: Request = None)
         )
 
 @router.post("/search", response_model=SearchResponse)
-async def search_documents(request_data: SearchRequest, request: Request = None):
+async def search_documents(
+    request_data: SearchRequest, 
+    request: Request = None,
+    current_user: dict = Depends(get_current_user)
+):
     """
     Search indexed documents using local vector similarity
     Returns relevant document chunks based on query
     Enhanced with comprehensive audit logging
+    REQUIRES AUTHENTICATION: JWT token or API key
     """
     start_time = time.time()
     request_id = str(uuid.uuid4())

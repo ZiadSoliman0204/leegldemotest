@@ -3,13 +3,13 @@ Main FastAPI application for Law Firm AI Assistant
 Provides routing to remote LLM and document management capabilities
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import os
 from loguru import logger
 
-from .routes import chat, documents
+from .routes import chat, documents, auth
 from .config import settings
 
 # Load environment variables
@@ -34,8 +34,12 @@ app.add_middleware(
 )
 
 # Include routers
+app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(chat.router, prefix="/api/v1/chat", tags=["chat"])
 app.include_router(documents.router, prefix="/api/v1/documents", tags=["documents"])
+
+# Import auth for test endpoint
+from .auth import get_current_user
 
 @app.on_event("startup")
 async def startup_event():
@@ -61,4 +65,13 @@ async def health_check():
         "llm_configured": bool(settings.LLM_API_URL and settings.LLM_API_KEY),
         "embedding_service": "local",
         "chroma_path": settings.CHROMA_DB_PATH
+    }
+
+@app.get("/api/v1/auth/test")
+async def test_auth(current_user: dict = Depends(get_current_user)):
+    """Test authentication endpoint"""
+    return {
+        "status": "authenticated",
+        "user": current_user,
+        "message": "Authentication successful"
     } 

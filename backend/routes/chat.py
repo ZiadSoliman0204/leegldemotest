@@ -16,6 +16,7 @@ from ..models import ChatRequest, ChatResponse, ErrorResponse
 from ..config import settings
 from ..services.llm_client import LLMClient
 from ..services.rag_service import LocalRAGService
+from ..auth import get_current_user
 
 router = APIRouter()
 
@@ -70,11 +71,16 @@ def log_chat_audit(
         logger.error(f"Failed to log audit event: {e}")
 
 @router.post("/completions", response_model=ChatResponse)
-async def chat_completion(request: ChatRequest, http_request: Request):
+async def chat_completion(
+    request: ChatRequest, 
+    http_request: Request,
+    current_user: dict = Depends(get_current_user)
+):
     """
     Process user prompt and return LLM response with optional RAG context
     Routes the request to remote LLaMA 3 70B model via OpenAI-compatible API
     Enhanced with comprehensive audit logging
+    REQUIRES AUTHENTICATION: JWT token or API key
     """
     start_time = time.time()
     request_id = str(uuid.uuid4())
@@ -128,10 +134,10 @@ async def chat_completion(request: ChatRequest, http_request: Request):
                 selected_document_ids=request.selected_document_ids
             )
             
-            # Filter by similarity threshold
+            # Filter by similarity threshold (very low for local TF-IDF embeddings)
             filtered_results = [
                 result for result in context_results 
-                if result.get('similarity', 0.0) >= 0.7
+                if result.get('similarity', 0.0) >= 0.001  # Very low threshold for TF-IDF
             ]
             
             rag_documents_found = len(filtered_results)
@@ -162,7 +168,7 @@ async def chat_completion(request: ChatRequest, http_request: Request):
                 log_chat_audit(
                     action_type="RAG_QUERY_NO_RESULTS",
                     status="success",
-                    details="No relevant documents found above similarity threshold (0.7)",
+                    details="No relevant documents found above similarity threshold (0.001)",
                     ip_address=ip_address,
                     content_hash=prompt_hash,
                     severity_level="INFO",
