@@ -442,6 +442,7 @@ class ThemeManager:
         status_map = {
             'online': colors['success'],
             'offline': colors['error'],
+            'unknown': colors['warning'],
             'warning': colors['warning'],
             'info': colors['info'],
             'primary': colors['primary'],
@@ -453,5 +454,11 @@ class ThemeManager:
     def render_status_indicator(self, status: str, text: str):
         """Render a status indicator with appropriate color"""
         color = self.get_status_color(status)
-        st.markdown(f'<span style="color: {color}; font-weight: 600;">● {text}</span>', 
+        if status == "unknown":
+            icon = "⏳"
+        elif status == "online":
+            icon = "●"
+        else:
+            icon = "●"
+        st.markdown(f'<span style="color: {color}; font-weight: 600;">{icon} {text}</span>', 
                    unsafe_allow_html=True) 

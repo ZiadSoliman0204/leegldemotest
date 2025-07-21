@@ -101,6 +101,7 @@ class LawFirmAIApp:
             'messages': [],
             'documents_uploaded': [],
             'api_status': 'unknown',
+            'ai_service_status': 'unknown',
             'current_view': 'chat',
             'use_rag': True,
             'max_tokens': DEFAULT_MAX_TOKENS,
@@ -114,7 +115,9 @@ class LawFirmAIApp:
             # Document selection for context
             'selected_document_ids': [],
             # Document deletion confirmation
-            'confirm_delete_document': None
+            'confirm_delete_document': None,
+            # Chat UI state
+            'message_being_sent': False
         }
         
         for key, value in default_values.items():
@@ -132,11 +135,23 @@ class LawFirmAIApp:
         except Exception:
             st.session_state.api_status = "offline"
     
+    def check_ai_service_health(self):
+        """Check if the AI service (localhost:1234) is running"""
+        try:
+            response = requests.get("http://localhost:1234/v1/models", timeout=3)
+            if response.status_code == 200:
+                st.session_state.ai_service_status = "online"
+            else:
+                st.session_state.ai_service_status = "offline"
+        except Exception:
+            st.session_state.ai_service_status = "offline"
+    
     def refresh_all_data(self):
         """Refresh all application data - useful when API was offline"""
         with st.spinner("Refreshing application data..."):
             # Check API health
             self.check_api_health()
+            self.check_ai_service_health()
             
             # Reset chat-related states
             st.session_state.chat_history_needs_refresh = True
@@ -182,15 +197,25 @@ class LawFirmAIApp:
         """, unsafe_allow_html=True)
     
     def render_api_status(self):
-        """Render API connection status with refresh option"""
+        """Render API and AI service connection status with refresh option"""
+        # Backend API Status
         if st.session_state.api_status == "online":
-            self.theme_manager.render_status_indicator("online", "API Connected")
+            self.theme_manager.render_status_indicator("online", "Backend API Connected")
         else:
-            self.theme_manager.render_status_indicator("offline", "API Disconnected")
+            self.theme_manager.render_status_indicator("offline", "Backend API Disconnected")
             
-            # Show refresh button when API is offline
-            if st.button("Retry Connection", 
-                        help="Refresh and check API connection again", 
+        # AI Service Status
+        if st.session_state.ai_service_status == "online":
+            self.theme_manager.render_status_indicator("online", "AI Service Connected")
+        elif st.session_state.ai_service_status == "offline":
+            self.theme_manager.render_status_indicator("offline", "AI Service Disconnected")
+        else:
+            self.theme_manager.render_status_indicator("unknown", "AI Service Status Unknown")
+        
+        # Show refresh button when any service is offline
+        if st.session_state.api_status != "online" or st.session_state.ai_service_status != "online":
+            if st.button("Retry Connections", 
+                        help="Refresh and check all service connections again", 
                         use_container_width=True,
                         type="primary"):
                 self.refresh_all_data()
@@ -958,21 +983,51 @@ class LawFirmAIApp:
                 return None
                 
         except requests.exceptions.RequestException as error:
-            # Log connection error
-            self.db_manager.log_audit_event(
-                user_id=current_user['id'] if current_user else None,
-                username=current_user['username'] if current_user else 'anonymous',
-                action_type="CHAT_CONNECTION_ERROR",
-                resource="chat_completion",
-                status="error",
-                details=f"Connection error: {str(error)}",
-                ip_address=ip_address,
-                session_id=self.session_id,
-                severity_level="ERROR"
-            )
+            error_str = str(error).lower()
             
-            st.error(f"Connection error: {str(error)}")
-            return None
+            # Check if it's specifically the AI service that's not running
+            if any(indicator in error_str for indicator in ['connection refused', 'max retries exceeded', 'connection aborted', 'timeout']):
+                # This is likely the AI service being down
+                ai_error_msg = """The AI service is currently not running or not responding.
+                
+Please check that:
+- Your local AI service is running on localhost:1234
+- The AI service is properly configured and accessible
+- No firewall is blocking the connection
+
+You may need to restart your AI service to continue using the chat feature."""
+
+                # Log AI service unavailable
+                self.db_manager.log_audit_event(
+                    user_id=current_user['id'] if current_user else None,
+                    username=current_user['username'] if current_user else 'anonymous',
+                    action_type="AI_SERVICE_UNAVAILABLE",
+                    resource="ai_service",
+                    status="error",
+                    details=f"AI service not reachable: {str(error)}",
+                    ip_address=ip_address,
+                    session_id=self.session_id,
+                    severity_level="ERROR"
+                )
+                
+                st.error(ai_error_msg)
+                return {"error": "ai_service_down", "message": "The AI service is currently not running. Please start your AI service and try again."}
+            else:
+                # Generic connection error
+                self.db_manager.log_audit_event(
+                    user_id=current_user['id'] if current_user else None,
+                    username=current_user['username'] if current_user else 'anonymous',
+                    action_type="CHAT_CONNECTION_ERROR",
+                    resource="chat_completion",
+                    status="error",
+                    details=f"Connection error: {str(error)}",
+                    ip_address=ip_address,
+                    session_id=self.session_id,
+                    severity_level="ERROR"
+                )
+                
+                st.error(f"Connection error: {str(error)}")
+                return None
         except Exception as error:
             # Log unexpected error
             self.db_manager.log_audit_event(
@@ -1016,27 +1071,71 @@ class LawFirmAIApp:
         )
     
     def render_chat_messages(self):
-        """Render chat message history with working display"""        
-        # Simple, working message display without complex CSS
-        for i, message in enumerate(st.session_state.messages):
-            if message["role"] == "user":
-                # User message
-                st.markdown("**User:**")
-                st.info(message["content"])
-            else:
-                # Assistant message  
-                st.markdown("**Legal Assistant:**")
-                st.success(message["content"])
-                
-                # Show sources if available
-                if "sources" in message and message["sources"]:
-                    with st.expander("View Sources", expanded=False):
-                        for j, source in enumerate(message["sources"], 1):
-                            st.markdown(f"**Source {j}:** {source}")
+        """Render chat message history with proper scrolling"""
+        # Add CSS for proper chat scrolling
+        st.markdown("""
+        <style>
+        .chat-messages-container {
+            max-height: 500px;
+            overflow-y: auto;
+            padding: 10px;
+            border: 1px solid #3F3F3F;
+            border-radius: 10px;
+            background-color: #1A1A1A;
+            margin: 10px 0;
+        }
+        .chat-messages-container::-webkit-scrollbar {
+            width: 8px;
+        }
+        .chat-messages-container::-webkit-scrollbar-track {
+            background: #2A2A2A;
+            border-radius: 4px;
+        }
+        .chat-messages-container::-webkit-scrollbar-thumb {
+            background: #4A90E2;
+            border-radius: 4px;
+        }
+        .chat-messages-container::-webkit-scrollbar-thumb:hover {
+            background: #5BA0F2;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        # Create scrollable container
+        with st.container():
+            st.markdown('<div class="chat-messages-container">', unsafe_allow_html=True)
             
-            # Add separator between messages except for the last one
-            if i < len(st.session_state.messages) - 1:
-                st.markdown("---")
+            for i, message in enumerate(st.session_state.messages):
+                if message["role"] == "user":
+                    # User message
+                    st.markdown("**User:**")
+                    st.info(message["content"])
+                else:
+                    # Assistant message  
+                    st.markdown("**Legal Assistant:**")
+                    st.success(message["content"])
+                    
+                    # Show sources if available
+                    if "sources" in message and message["sources"]:
+                        with st.expander("View Sources", expanded=False):
+                            for j, source in enumerate(message["sources"], 1):
+                                st.markdown(f"**Source {j}:** {source}")
+                
+                # Add separator between messages except for the last one
+                if i < len(st.session_state.messages) - 1:
+                    st.markdown("---")
+            
+            st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Auto-scroll to bottom using JavaScript
+        st.markdown("""
+        <script>
+        const chatContainer = document.querySelector('.chat-messages-container');
+        if (chatContainer) {
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+        </script>
+        """, unsafe_allow_html=True)
     
 
     
@@ -1059,12 +1158,17 @@ class LawFirmAIApp:
         user_input = st.chat_input("Ask your legal question here...")
         
         if user_input:
+            # Set flag to immediately hide placeholder
+            st.session_state.message_being_sent = True
             self._process_user_input(user_input)
     
     def _process_user_input(self, user_input: str):
         """Process user input and get AI response"""
         # Add user message to history
         self._add_message_to_history("user", user_input)
+        
+        # Clear the sending flag since message is now in history
+        st.session_state.message_being_sent = False
         
         # Log user action
         self.auth_manager.log_user_action("CHAT_MESSAGE", f"User sent message: {user_input[:100]}...")
@@ -1074,7 +1178,26 @@ class LawFirmAIApp:
             response = self.send_chat_message(user_input)
             
             if response:
-                self._handle_api_response(response)
+                # Check if it's an error response (AI service down)
+                if isinstance(response, dict) and response.get("error") == "ai_service_down":
+                    # Add AI service unavailable message to chat history
+                    error_message = """I apologize, but I'm currently unable to respond because the AI service is not running.
+                    
+To resolve this issue:
+1. Start your local AI service on port 1234
+2. Ensure it's properly configured and accessible
+3. Try sending your message again
+
+Your message has been saved, and I'll be able to respond once the AI service is running again."""
+                    
+                    self._add_message_to_history("assistant", error_message)
+                else:
+                    # Normal successful response
+                    self._handle_api_response(response)
+            else:
+                # Handle other types of errors
+                error_message = """I encountered an error while trying to process your message. Please try again, and if the problem persists, check that all services are running properly."""
+                self._add_message_to_history("assistant", error_message)
         
         # Rerun to show new messages
         st.rerun()
@@ -1164,30 +1287,59 @@ class LawFirmAIApp:
         # Document selection section
         self.render_document_selection()
         
-        # Chat messages area with fixed height
-        if not st.session_state.messages:
+        # Chat messages area - show placeholder only if no messages AND not currently sending
+        if not st.session_state.messages and not st.session_state.get('message_being_sent', False):
             st.markdown("""
             <div style="
                 height: 400px; 
-                border: 2px dashed #e0e0e0; 
+                border: 2px dashed #3F3F3F; 
                 border-radius: 10px; 
                 display: flex; 
                 align-items: center; 
                 justify-content: center;
-                background-color: #fafafa;
-                color: #666;
+                background-color: #1A1A1A;
+                color: #CCCCCC;
                 font-size: 1.1em;
                 text-align: center;
                 margin: 10px 0;
             ">
                 <div>
-                    <div style="font-size: 1.5em; margin-bottom: 10px; font-weight: bold;">Chat Interface</div>
+                    <div style="font-size: 1.5em; margin-bottom: 10px; font-weight: bold; color: #FAFAFA;">Chat Interface</div>
                     <div>Start a conversation by asking a legal question below.</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        elif st.session_state.get('message_being_sent', False) and not st.session_state.messages:
+            # Show loading state when first message is being sent
+            st.markdown("""
+            <div style="
+                height: 400px; 
+                border: 2px solid #4A90E2; 
+                border-radius: 10px; 
+                display: flex; 
+                align-items: center; 
+                justify-content: center;
+                background-color: #1A1A1A;
+                color: #CCCCCC;
+                font-size: 1.1em;
+                text-align: center;
+                margin: 10px 0;
+            ">
+                <div>
+                    <div style="font-size: 1.2em; margin-bottom: 10px; color: #4A90E2;">Processing your message...</div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
         else:
             self.render_chat_messages()
+            
+            # Add scroll to bottom button if there are many messages
+            if len(st.session_state.messages) > 3:
+                col1, col2, col3 = st.columns([1, 1, 1])
+                with col2:
+                    if st.button("↓ Scroll to Bottom", use_container_width=True, type="secondary"):
+                        # Force re-render which will trigger auto-scroll
+                        st.rerun()
         
         # Action buttons
         if st.session_state.messages:
@@ -2599,6 +2751,8 @@ class LawFirmAIApp:
         # Check API health on startup
         if st.session_state.api_status == "unknown":
             self.check_api_health()
+        if st.session_state.ai_service_status == "unknown":
+            self.check_ai_service_health()
         
         # Sidebar content
         self.render_api_status()
