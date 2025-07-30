@@ -227,16 +227,25 @@ class LocalRAGService:
             if not query.strip():
                 return []
             
+            # Debug: Log search parameters
+            logger.info(f"RAG Search - Query: '{query}', n_results: {n_results}, doc_filter: {selected_document_ids}")
+            
             # Generate embedding for query using local method
             query_embedding = self.document_processor._generate_local_embedding(query)
+            logger.info(f"RAG Search - Generated query embedding length: {len(query_embedding)}")
             
             # Prepare where clause for document filtering
             where_clause = None
             if selected_document_ids:
+                logger.info(f"RAG Service - Filtering by document IDs: {selected_document_ids}")
                 if len(selected_document_ids) == 1:
                     where_clause = {"document_id": selected_document_ids[0]}
+                    logger.info(f"RAG Service - Single document filter: {where_clause}")
                 else:
                     where_clause = {"document_id": {"$in": selected_document_ids}}
+                    logger.info(f"RAG Service - Multiple document filter: {where_clause}")
+            else:
+                logger.info("RAG Service - No document filtering (searching all documents)")
             
             # Search in ChromaDB with optional filtering
             search_params = {
@@ -248,6 +257,12 @@ class LocalRAGService:
                 search_params["where"] = where_clause
             
             results = self.collection.query(**search_params)
+            
+            # Debug: Log ChromaDB results
+            logger.info(f"RAG Service - ChromaDB returned {len(results['documents'][0]) if results['documents'] and results['documents'][0] else 0} results")
+            if results['metadatas'] and results['metadatas'][0]:
+                doc_ids_found = [meta.get('document_id', 'unknown') for meta in results['metadatas'][0]]
+                logger.info(f"RAG Service - Document IDs found: {doc_ids_found}")
             
             # Format results
             formatted_results = []
@@ -270,6 +285,11 @@ class LocalRAGService:
             
             search_context = f"all documents" if not selected_document_ids else f"selected documents: {', '.join(selected_document_ids)}"
             logger.info(f"Found {len(formatted_results)} relevant chunks for query in {search_context}")
+            
+            # Debug: Log collection state when called from chat
+            collection_count = self.collection.count()
+            logger.info(f"RAG Service - Collection has {collection_count} total items when returning {len(formatted_results)} results")
+            
             return formatted_results
             
         except Exception as error:

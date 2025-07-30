@@ -16,6 +16,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     """Request for chat completion"""
     message: str = Field(..., description="User's question or prompt")
+    messages: Optional[List[ChatMessage]] = Field(None, description="Full conversation history for context")
     context: Optional[str] = Field(None, description="Additional context from RAG")
     use_rag: bool = Field(True, description="Whether to use RAG for context")
     selected_document_ids: Optional[List[str]] = Field(None, description="Document IDs to filter RAG search")

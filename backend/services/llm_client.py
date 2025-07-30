@@ -28,7 +28,8 @@ class LLMClient:
     
     async def chat_completion(
         self, 
-        message: str, 
+        message: str = None,
+        messages: Optional[List[Dict[str, str]]] = None, 
         max_tokens: int = 2048, 
         temperature: float = 0.7,
         system_message: Optional[str] = None
@@ -37,7 +38,8 @@ class LLMClient:
         Send chat completion request to remote LLM
         
         Args:
-            message: User's input message
+            message: User's input message (deprecated, use messages instead)
+            messages: Full conversation history in OpenAI format
             max_tokens: Maximum tokens in response
             temperature: Response creativity (0.0-1.0)
             system_message: Optional system prompt
@@ -49,23 +51,42 @@ class LLMClient:
             raise ValueError("LLM API not configured - check LLM_API_URL and LLM_API_KEY")
         
         # Prepare messages in OpenAI format
-        messages = []
-        
-        if system_message:
-            messages.append({"role": "system", "content": system_message})
+        if messages:
+            # Use provided conversation history
+            formatted_messages = []
+            
+            # Add system message at the beginning if provided
+            if system_message:
+                formatted_messages.append({"role": "system", "content": system_message})
+            else:
+                # Default system message for legal assistant
+                formatted_messages.append({
+                    "role": "system", 
+                    "content": "You are a helpful AI assistant for legal professionals. Provide accurate, professional responses based on the provided context and legal knowledge."
+                })
+            
+            # Add conversation history
+            formatted_messages.extend(messages)
         else:
-            # Default system message for legal assistant
-            messages.append({
-                "role": "system", 
-                "content": "You are a helpful AI assistant for legal professionals. Provide accurate, professional responses based on the provided context and legal knowledge."
-            })
-        
-        messages.append({"role": "user", "content": message})
+            # Fallback to single message format for backward compatibility
+            formatted_messages = []
+            
+            if system_message:
+                formatted_messages.append({"role": "system", "content": system_message})
+            else:
+                # Default system message for legal assistant
+                formatted_messages.append({
+                    "role": "system", 
+                    "content": "You are a helpful AI assistant for legal professionals. Provide accurate, professional responses based on the provided context and legal knowledge."
+                })
+            
+            if message:
+                formatted_messages.append({"role": "user", "content": message})
         
         # Prepare request payload
         payload = {
             "model": self.model_name,
-            "messages": messages,
+            "messages": formatted_messages,
             "max_tokens": max_tokens,
             "temperature": temperature,
             "stream": False

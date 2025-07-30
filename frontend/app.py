@@ -39,6 +39,9 @@ UPLOAD_TIMEOUT = 120
 DEFAULT_MAX_TOKENS = 2048
 DEFAULT_TEMPERATURE = 0.7
 
+# Set up logger
+logger = logging.getLogger(__name__)
+
 class LawFirmAIApp:
     """Main application class for Law Firm AI Assistant"""
     
@@ -950,6 +953,20 @@ class LawFirmAIApp:
             if response.status_code == 200:
                 result = response.json()
                 
+                # Debug: Log the response structure
+                logger.info(f"Chat API Response: {result}")
+                
+                # Validate response structure
+                if not isinstance(result, dict):
+                    st.error("Invalid response format from API")
+                    return {"response": "I received an invalid response format. Please try again.", "sources": []}
+                
+                # Ensure sources is always a list
+                if "sources" in result and result["sources"] is None:
+                    result["sources"] = []
+                elif "sources" not in result:
+                    result["sources"] = []
+                
                 # Log successful chat completion
                 self.db_manager.log_audit_event(
                     user_id=current_user['id'] if current_user else None,
@@ -957,7 +974,7 @@ class LawFirmAIApp:
                     action_type="CHAT_COMPLETED",
                     resource="chat_completion",
                     status="success",
-                    details=f"Response generated successfully. Tokens used: {result.get('usage', {}).get('total_tokens', 'unknown')}",
+                    details=f"Response generated successfully. Tokens used: {result.get('usage', {}).get('total_tokens', 'unknown')}. Sources: {len(result.get('sources', []))}",
                     ip_address=ip_address,
                     user_agent=user_agent,
                     session_id=self.session_id,
@@ -979,8 +996,15 @@ class LawFirmAIApp:
                     severity_level="ERROR"
                 )
                 
-                st.error(f"API Error: {response.status_code} - {response.text}")
-                return None
+                # Return a structured error response instead of None
+                error_message = f"API Error {response.status_code}: Unable to process your request. Please try again."
+                if response.status_code == 503:
+                    error_message = "The AI service is temporarily unavailable. Please try again in a moment."
+                elif response.status_code == 500:
+                    error_message = "An internal server error occurred. Please try again."
+                
+                st.error(error_message)
+                return {"response": error_message, "sources": [], "error": True}
                 
         except requests.exceptions.RequestException as error:
             error_str = str(error).lower()
@@ -1011,7 +1035,7 @@ You may need to restart your AI service to continue using the chat feature."""
                 )
                 
                 st.error(ai_error_msg)
-                return {"error": "ai_service_down", "message": "The AI service is currently not running. Please start your AI service and try again."}
+                return {"error": "ai_service_down", "response": "The AI service is currently not running. Please start your AI service and try again.", "sources": []}
             else:
                 # Generic connection error
                 self.db_manager.log_audit_event(
@@ -1026,8 +1050,9 @@ You may need to restart your AI service to continue using the chat feature."""
                     severity_level="ERROR"
                 )
                 
-                st.error(f"Connection error: {str(error)}")
-                return None
+                error_message = f"Connection error: Unable to reach the service. Please check your connection and try again."
+                st.error(error_message)
+                return {"response": error_message, "sources": [], "error": True}
         except Exception as error:
             # Log unexpected error
             self.db_manager.log_audit_event(
@@ -1042,8 +1067,9 @@ You may need to restart your AI service to continue using the chat feature."""
                 severity_level="ERROR"
             )
             
-            st.error(f"Unexpected error: {str(error)}")
-            return None
+            error_message = f"Unexpected error occurred. Please try again."
+            st.error(error_message)
+            return {"response": error_message, "sources": [], "error": True}
     
     def _build_chat_payload(self, message: str) -> Dict[str, Any]:
         """Build the payload for chat API request"""
@@ -1054,9 +1080,29 @@ You may need to restart your AI service to continue using the chat feature."""
             "temperature": st.session_state.temperature
         }
         
+        # Add conversation history (excluding the current message being sent)
+        if st.session_state.messages:
+            conversation_messages = []
+            for msg in st.session_state.messages:
+                # Ensure proper structure
+                if isinstance(msg, dict) and "role" in msg and "content" in msg:
+                    conversation_messages.append({
+                        "role": msg["role"],
+                        "content": msg["content"]
+                    })
+            
+            if conversation_messages:  # Only add if we have valid messages
+                payload["messages"] = conversation_messages
+                
+        # Debug logging
+        logger.info(f"Chat payload: message='{message[:50]}...', history_length={len(payload.get('messages', []))}, use_rag={payload['use_rag']}")
+        
         # Add selected document IDs if any are selected
         if st.session_state.selected_document_ids:
             payload["selected_document_ids"] = st.session_state.selected_document_ids
+            logger.info(f"Frontend - Selected document IDs in payload: {st.session_state.selected_document_ids}")
+        else:
+            logger.info("Frontend - No document IDs selected, will search all documents")
         
         return payload
     
@@ -1158,12 +1204,17 @@ You may need to restart your AI service to continue using the chat feature."""
         user_input = st.chat_input("Ask your legal question here...")
         
         if user_input:
+            logger.info(f"Chat input received: '{user_input[:50]}...'")
             # Set flag to immediately hide placeholder
             st.session_state.message_being_sent = True
             self._process_user_input(user_input)
+        elif user_input == "":
+            logger.debug("Empty chat input received - ignoring")
     
     def _process_user_input(self, user_input: str):
         """Process user input and get AI response"""
+        logger.info(f"Processing user input: '{user_input[:100]}...'")
+        
         # Add user message to history
         self._add_message_to_history("user", user_input)
         
@@ -1173,33 +1224,48 @@ You may need to restart your AI service to continue using the chat feature."""
         # Log user action
         self.auth_manager.log_user_action("CHAT_MESSAGE", f"User sent message: {user_input[:100]}...")
         
+        logger.info(f"Current conversation history length: {len(st.session_state.messages)}")
+        
         # Send to API and get response
         with st.spinner("Thinking..."):
-            response = self.send_chat_message(user_input)
-            
-            if response:
-                # Check if it's an error response (AI service down)
-                if isinstance(response, dict) and response.get("error") == "ai_service_down":
-                    # Add AI service unavailable message to chat history
-                    error_message = """I apologize, but I'm currently unable to respond because the AI service is not running.
-                    
+            try:
+                response = self.send_chat_message(user_input)
+                logger.info(f"API response received: {type(response)}")
+                
+                if response:
+                    # Check if it's an error response (AI service down)
+                    if isinstance(response, dict) and response.get("error") == "ai_service_down":
+                        # Add AI service unavailable message to chat history
+                        error_message = """I apologize, but I'm currently unable to respond because the AI service is not running.
+                        
 To resolve this issue:
 1. Start your local AI service on port 1234
 2. Ensure it's properly configured and accessible
 3. Try sending your message again
 
 Your message has been saved, and I'll be able to respond once the AI service is running again."""
-                    
-                    self._add_message_to_history("assistant", error_message)
+                        
+                        self._add_message_to_history("assistant", error_message, [])
+                    else:
+                        # Normal successful response
+                        self._handle_api_response(response)
                 else:
-                    # Normal successful response
-                    self._handle_api_response(response)
-            else:
-                # Handle other types of errors
-                error_message = """I encountered an error while trying to process your message. Please try again, and if the problem persists, check that all services are running properly."""
-                self._add_message_to_history("assistant", error_message)
+                    # Handle None response
+                    error_message = """I encountered an error while trying to process your message. Please try again, and if the problem persists, check that all services are running properly."""
+                    self._add_message_to_history("assistant", error_message, [])
+                    
+            except Exception as e:
+                # Catch any unexpected errors in message processing
+                error_message = f"""An unexpected error occurred while processing your message: {str(e)}
+                
+Please try again, and if the problem persists, check that all services are running properly."""
+                self._add_message_to_history("assistant", error_message, [])
+                
+                # Log the error for debugging
+                self.auth_manager.log_user_action("CHAT_PROCESSING_ERROR", f"Error processing message: {str(e)}")
         
         # Rerun to show new messages
+        logger.info(f"Message processing complete. Total messages: {len(st.session_state.messages)}")
         st.rerun()
     
     def _add_message_to_history(self, role: str, content: str, sources: List[str] = None):
@@ -1220,8 +1286,21 @@ Your message has been saved, and I'll be able to respond once the AI service is 
     
     def _handle_api_response(self, response: Dict[str, Any]):
         """Handle API response and add to chat history"""
-        assistant_content = response.get("response", "Sorry, I couldn't process your request.")
-        sources = response.get("sources", [])
+        if not response:
+            # Handle empty response
+            error_message = "I received an empty response. Please try again."
+            self._add_message_to_history("assistant", error_message, [])
+            return
+        
+        # Extract response content with fallback
+        assistant_content = response.get("response") or response.get("content") or "Sorry, I couldn't process your request."
+        
+        # Extract sources with proper type handling
+        sources = response.get("sources")
+        if sources is None:
+            sources = []
+        elif not isinstance(sources, list):
+            sources = []
         
         self._add_message_to_history("assistant", assistant_content, sources)
         
@@ -1333,11 +1412,11 @@ Your message has been saved, and I'll be able to respond once the AI service is 
         else:
             self.render_chat_messages()
             
-            # Add scroll to bottom button if there are many messages
-            if len(st.session_state.messages) > 3:
-                col1, col2, col3 = st.columns([1, 1, 1])
+            # Add scroll to bottom button if there are many messages - make it less prominent
+            if len(st.session_state.messages) > 5:
+                col1, col2, col3 = st.columns([2, 1, 2])
                 with col2:
-                    if st.button("↓ Scroll to Bottom", use_container_width=True, type="secondary"):
+                    if st.button("↓ Scroll to Bottom", type="secondary", key="scroll_btn"):
                         # Force re-render which will trigger auto-scroll
                         st.rerun()
         
@@ -1355,6 +1434,9 @@ Your message has been saved, and I'll be able to respond once the AI service is 
             with col2:
                 if st.button("Export Chat", use_container_width=True, type="secondary"):
                     self.export_current_chat()
+        
+        # Chat input - moved here to ensure proper rendering order
+        self.handle_chat_input()
     
     def upload_document(self, uploaded_file):
         """Upload document with enhanced audit logging"""
@@ -2772,9 +2854,7 @@ Your message has been saved, and I'll be able to respond once the AI service is 
         elif st.session_state.current_view == 'users':
             self.render_user_management()
         
-        # Handle chat input (only show in chat view)
-        if st.session_state.current_view == 'chat':
-            self.handle_chat_input()
+        # Chat input is now handled within render_chat_interface() to ensure proper rendering order
 
 def main():
     """Main function to run the app"""

@@ -110,7 +110,7 @@ async def chat_completion(
     try:
         # Get RAG context if requested
         context = None
-        sources = None
+        sources = []  # Always initialize as empty list
         rag_documents_found = 0
         
         if request.use_rag and request.message:
@@ -128,11 +128,33 @@ async def chat_completion(
                 resource="rag_service"
             )
             
+            # Debug: Log the selected document IDs  
+            logger.info(f"RAG Search - Selected document IDs: {request.selected_document_ids}")
+            
+            # Debug: Check RAG service state
+            try:
+                collection_count = rag_service.collection.count()
+                logger.info(f"RAG Service - Collection count before search: {collection_count}")
+                
+                # List documents in collection
+                docs_in_collection = rag_service.list_documents()
+                logger.info(f"RAG Service - Documents in collection: {len(docs_in_collection)}")
+                for doc in docs_in_collection:
+                    logger.info(f"RAG Service - Doc: {doc['filename']} (ID: {doc['document_id']})")
+                    
+            except Exception as e:
+                logger.error(f"RAG Service - Error checking collection state: {e}")
+            
             context_results = rag_service.search_documents(
                 query=request.message,
                 n_results=5,
                 selected_document_ids=request.selected_document_ids
             )
+            
+            # Debug: Log ALL search results before filtering
+            logger.info(f"RAG Search - Raw results returned: {len(context_results)} items")
+            for i, result in enumerate(context_results):
+                logger.info(f"Raw Result {i}: similarity={result.get('similarity', 'N/A')}, distance={result.get('distance', 'N/A')}, content='{result['content'][:50]}...'")
             
             # Filter by similarity threshold (very low for local TF-IDF embeddings)
             filtered_results = [
@@ -142,12 +164,21 @@ async def chat_completion(
             
             rag_documents_found = len(filtered_results)
             
+            # Debug: Log filtered results
+            logger.info(f"RAG Search - Filtered results: {len(filtered_results)} documents")
+            for i, result in enumerate(filtered_results):
+                logger.info(f"RAG Result {i}: similarity={result.get('similarity', 0)}, content='{result['content'][:100]}...'")
+            
             if filtered_results:
                 context = "\n\n".join([
                     f"[Source: {result['metadata'].get('filename', 'Unknown')}]\n{result['content']}"
                     for result in filtered_results
                 ])
                 sources = [result['metadata'].get('filename', 'Unknown') for result in filtered_results]
+                
+                # Debug: Log the formatted context
+                logger.info(f"RAG Context - Formatted context length: {len(context)} chars")
+                logger.info(f"RAG Context - Preview: {context[:200]}...")
                 
                 # Log successful RAG retrieval
                 log_chat_audit(
@@ -178,10 +209,25 @@ async def chat_completion(
                 
                 logger.info("No relevant documents found in RAG search")
         
-        # Prepare the enhanced prompt with context
-        enhanced_message = request.message
+        # Prepare conversation messages with context
+        conversation_messages = []
+        
+        # Add conversation history if provided
+        if request.messages:
+            logger.info(f"Processing {len(request.messages)} conversation history messages")
+            for i, msg in enumerate(request.messages):
+                conversation_messages.append({
+                    "role": msg.role,
+                    "content": msg.content
+                })
+                logger.debug(f"History message {i}: {msg.role} - {msg.content[:50]}...")
+        else:
+            logger.info("No conversation history provided")
+        
+        # Prepare the current message with RAG context if available
+        current_message = request.message
         if context:
-            enhanced_message = f"""Based on the following legal documents and context, please answer the question:
+            current_message = f"""Based on the following legal documents and context, please answer the question:
 
 CONTEXT:
 {context}
@@ -189,23 +235,40 @@ CONTEXT:
 QUESTION: {request.message}
 
 Please provide a comprehensive answer based on the provided documents. If the documents don't contain relevant information, please indicate this clearly."""
+            
+            # Debug: Log the enhanced message
+            logger.info(f"RAG Enhanced Message - Length: {len(current_message)} chars")
+            logger.info(f"RAG Enhanced Message - Preview: {current_message[:300]}...")
+        else:
+            logger.info("RAG - No context found, sending original message only")
+        
+        # Add the current message to conversation
+        conversation_messages.append({
+            "role": "user",
+            "content": current_message
+        })
         
         # Log LLM API call initiation
         log_chat_audit(
             action_type="LLM_API_CALL_INITIATED",
             status="initiated",
-            details=f"Sending request to LLM API. Enhanced prompt length: {len(enhanced_message)} chars",
+            details=f"Sending request to LLM API. Conversation length: {len(conversation_messages)} messages, Current message length: {len(current_message)} chars",
             ip_address=ip_address,
-            content_hash=hash_content(enhanced_message),
+            content_hash=hash_content(current_message),
             severity_level="INFO",
             request_id=request_id,
             resource="llm_api"
         )
         
-        # Call the remote LLM
-        logger.info("Sending request to remote LLM API")
+        # Call the remote LLM with conversation history
+        logger.info(f"Sending request to remote LLM API with {len(conversation_messages)} total messages")
+        
+        # Debug log conversation structure
+        debug_messages = [f"{msg['role']}: {msg['content'][:50]}..." for msg in conversation_messages]
+        logger.debug(f"Final conversation messages: {debug_messages}")
+        
         llm_response = await llm_client.chat_completion(
-            message=enhanced_message,
+            messages=conversation_messages,
             max_tokens=request.max_tokens or settings.MAX_TOKENS,
             temperature=request.temperature or settings.TEMPERATURE
         )
